@@ -608,6 +608,7 @@ async def get_photo(message: Message):
     if banned:
         await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%m.%Y %H:%M')}")
         return
+
     uid = message.from_user.id
     if uid not in photos:
         photos[uid] = []
@@ -617,31 +618,67 @@ async def get_photo(message: Message):
     if len(photos[uid]) < 2:
         await message.answer("✅ Перше фото отримано!\nНадішліть друге фото ❤️")
         return
+
     p1, p2 = photos[uid][0], photos[uid][1]
     text = random.choice(phrases) + "\n\n" + random.choice(wishes)
     pending[uid] = {"p1": p1, "p2": p2, "text": text}
+
     if auto_approve:
         try:
-            msg = await bot.send_media_group(CHANNEL_ID, media=[InputMediaPhoto(media=p1),
-                                                                InputMediaPhoto(media=p2, caption=text)])
-            number = save_post(msg[0].message_id, msg[1].message_id, uid, message.from_user.username,
-                               message.from_user.first_name)
-            await bot.edit_message_caption(chat_id=CHANNEL_ID, message_id=msg[1].message_id,
-                                           caption=text + f"\n\n🆔 Пост №{number}")
-            await message.answer(f"✅ Заявку автоматично схвалено!\n\n🆔 Пост №{number}\n❤️ Анкету опубліковано.")
+            msg = await bot.send_media_group(
+                CHANNEL_ID,
+                media=[
+                    InputMediaPhoto(media=p1),
+                    InputMediaPhoto(media=p2, caption=text)
+                ]
+            )
+            number = save_post(
+                msg[0].message_id,
+                msg[1].message_id,
+                uid,
+                message.from_user.username,
+                message.from_user.first_name
+            )
+            await bot.edit_message_caption(
+                chat_id=CHANNEL_ID,
+                message_id=msg[1].message_id,
+                caption=text + f"\n\n🆔 Пост №{number}"
+            )
+            await message.answer(
+                f"✅ Заявку автоматично схвалено!\n\n"
+                f"🆔 Пост №{number}\n"
+                "❤️ Анкету опубліковано."
+            )
             pending.pop(uid, None)
+            photos.pop(uid, None)
+            return
         except Exception as e:
             logging.exception("Помилка автоматичного схвалення")
             await message.answer("❌ Не вдалося автоматично опублікувати заявку.")
-        photos.pop(uid, None)
-        return
+            photos.pop(uid, None)
+            return
+
     try:
         await bot.send_message(ADMIN_ID, "👑 НОВА ЗАЯВКА НА ПАРУ")
-        await bot.send_media_group(ADMIN_ID, media=[InputMediaPhoto(media=p1), InputMediaPhoto(media=p2, caption=text)])
-        await bot.send_message(ADMIN_ID, "Оберіть дію:",
-                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                                   [InlineKeyboardButton(text="✅ Схвалити", callback_data=f"approve:{uid}"),
-                                    InlineKeyboardButton(text="❌ Відхилити", callback_data=f"reject:{uid}")]]))
+        await bot.send_media_group(
+            ADMIN_ID,
+            media=[
+                InputMediaPhoto(media=p1),
+                InputMediaPhoto(media=p2, caption=text)
+            ]
+        )
+        await bot.send_message(
+            ADMIN_ID,
+            "Оберіть дію:",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="✅ Схвалити", callback_data=f"approve:{uid}"),
+                        InlineKeyboardButton(text="❌ Відхилити", callback_data=f"reject:{uid}")
+                    ]
+                ]
+            )
+        )
         await message.answer("⏳ Заявку відправлено адміністратору.\nОчікуйте перевірки ❤️")
     except Exception:
         logging.exception("Помилка відправки заявки адміну")
@@ -663,12 +700,26 @@ async def approve(call: CallbackQuery):
         await call.answer("❌ Заявка вже оброблена", show_alert=True)
         return
     try:
-        msg = await bot.send_media_group(CHANNEL_ID, media=[InputMediaPhoto(media=data["p1"]),
-                                                            InputMediaPhoto(media=data["p2"], caption=data["text"])])
+        msg = await bot.send_media_group(
+            CHANNEL_ID,
+            media=[
+                InputMediaPhoto(media=data["p1"]),
+                InputMediaPhoto(media=data["p2"], caption=data["text"])
+            ]
+        )
         user = await bot.get_chat(uid)
-        number = save_post(msg[0].message_id, msg[1].message_id, uid, user.username, user.first_name)
-        await bot.edit_message_caption(chat_id=CHANNEL_ID, message_id=msg[1].message_id,
-                                       caption=data["text"] + f"\n\n🆔 Пост №{number}")
+        number = save_post(
+            msg[0].message_id,
+            msg[1].message_id,
+            uid,
+            user.username,
+            user.first_name
+        )
+        await bot.edit_message_caption(
+            chat_id=CHANNEL_ID,
+            message_id=msg[1].message_id,
+            caption=data["text"] + f"\n\n🆔 Пост №{number}"
+        )
         await call.message.edit_text(f"✅ ЗАЯВКА СХВАЛЕНА\n\n🆔 Пост №{number}\n📢 Опубліковано в канал.")
         pending.pop(uid, None)
     except Exception as e:
@@ -698,10 +749,6 @@ async def services_handler(call: CallbackQuery):
     )
     await call.answer()
 
-
-# ============================================================
-# ПЛАТНЫЕ УСЛУГИ (FIX provider_token)
-# ============================================================
 
 @dp.callback_query(lambda call: call.data == "buy_pin")
 async def buy_pin(call: CallbackQuery):
@@ -769,6 +816,7 @@ async def vip_premium(call: CallbackQuery):
     except Exception as e:
         await call.message.answer(f"❌ Помилка: {str(e)}")
     await call.answer()
+
 
 @dp.callback_query(lambda call: call.data == "vip_menu")
 async def vip_menu_handler(call: CallbackQuery):
