@@ -712,18 +712,25 @@ def admin_menu():
 # START
 # ============================================================
 
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-
-# ВМЕСТО main_menu() ИСПОЛЬЗУЙ ЭТО:
-reply_markup=ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="💌 Створити пару")],
-        [KeyboardButton(text="💎 VIP послуги")],
-        [KeyboardButton(text="⭐ Послуги")],
-        [KeyboardButton(text="📜 Правила")]
-    ],
-    resize_keyboard=True
-)
+@dp.message(Command("start"))
+async def start(message: Message):
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="💌 Створити пару")],
+            [KeyboardButton(text="💎 VIP послуги")],
+            [KeyboardButton(text="⭐ Послуги")],
+            [KeyboardButton(text="📜 Правила")]
+        ],
+        resize_keyboard=True
+    )
+    
+    await message.answer(
+        "💘 Ласкаво просимо в Купідон!\n\n"
+        "Створюй пари та знаходь кохання ❤️",
+        reply_markup=keyboard
+    )
 # ============================================================
 # ADMIN
 # ============================================================
