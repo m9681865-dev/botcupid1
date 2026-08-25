@@ -606,23 +606,15 @@ async def banned_list_cmd(message: Message):
 
 @dp.message(Command("start"))
 async def start(message: Message):
-    # Проверка бана
     banned, until, reason = is_banned(message.from_user.id)
     if banned:
-        await message.answer(
-            f"🚫 **ВИ ЗАБАНЕНІ!**\n\n"
-            f"📅 До: {until.strftime('%d.%m.%Y %H:%M')}\n"
-            f"📝 Причина: {reason or 'Не вказана'}"
-        )
+        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%m.%Y %H:%M')}")
         return
-
     await message.answer(
         "💘 Ласкаво просимо в Купідон!\n\n"
         "Створюй пари та знаходь кохання ❤️",
         reply_markup=main_menu()
     )
-
-
 # ============================================================
 # ADMIN
 # ============================================================
@@ -977,7 +969,67 @@ async def number_handler(message: Message):
         await message.answer(f"🗑 Пост №{number} видалено.")
         return
 
+# ============================================================
+# ОБРАБОТЧИКИ КНОПОК (ReplyKeyboard)
+# ============================================================
 
+@dp.message(F.text == "💌 Створити пару")
+async def create_pair(message: Message):
+    banned, until, reason = is_banned(message.from_user.id)
+    if banned:
+        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%m.%Y %H:%M')}")
+        return
+    
+    uid = message.from_user.id
+    photos[uid] = []
+    await message.answer(
+        "📸 Надішліть 2 фото:\n\n"
+        "1️⃣ Фото хлопця\n"
+        "2️⃣ Фото дівчини ❤️"
+    )
+
+
+@dp.message(F.text == "💎 VIP послуги")
+async def vip_services(message: Message):
+    banned, until, reason = is_banned(message.from_user.id)
+    if banned:
+        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%m.%Y %H:%M')}")
+        return
+    
+    await message.answer(
+        "💎 VIP ПОСЛУГИ:\n\n"
+        "💎 Базовий VIP — 10 ⭐\n"
+        "👑 Premium VIP — 25 ⭐\n\n"
+        "Натисніть кнопку нижче:",
+        reply_markup=vip_menu()
+    )
+
+
+@dp.message(F.text == "⭐ Послуги")
+async def services_button(message: Message):
+    banned, until, reason = is_banned(message.from_user.id)
+    if banned:
+        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%m.%Y %H:%M')}")
+        return
+    
+    await message.answer(
+        "⭐ ПЛАТНІ ПОСЛУГИ:\n\n"
+        "📌 Закріпити анкету — 5 ⭐\n"
+        "🗑 Видалити пост — 5 ⭐\n\n"
+        "Натисніть кнопку нижче:",
+        reply_markup=services_menu()
+    )
+
+
+@dp.message(F.text == "📜 Правила")
+async def rules_button(message: Message):
+    await message.answer(
+        "📜 ПРАВИЛА:\n\n"
+        "🚫 Заборонено 18+\n"
+        "🚫 Заборонено образи\n"
+        "🚫 Заборонено спам\n"
+        "❤️ Поважайте інших"
+    )
 # ============================================================
 # BACK
 # ============================================================
