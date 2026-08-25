@@ -1,0 +1,6 @@
+aiogram==2.25.1
+telethon==1.34.0
+flask==2.3.3
+requests==2.31.0
+phonenumbers==8.13.29
+peewee==3.17.1
