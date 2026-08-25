@@ -2,41 +2,32 @@ import os
 import threading
 import logging
 import time
+import asyncio
 from flask import Flask
-from Kupidon import bot, dp  # Импорт вашего бота и диспетчера
+from Kupidon import bot, dp  # Убедитесь, что эти объекты существуют в Kupidon.py
 
 logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 
 @app.route('/')
-def home():
-    return "Bot is running!", 200
-
 @app.route('/health')
-def health():
+def health_check():
+    """Эндпоинт для проверки работоспособности."""
     return "OK", 200
 
 def run_bot():
-    """Запускает бота в асинхронном режиме для aiogram 3.x"""
+    """Запускает бота с использованием aiogram 3.x."""
     try:
-        # В aiogram 3.x запуск через executor удален, используем async-запуск
-        import asyncio
-        from aiogram.types import BotCommand
+        # Создаем и запускаем новый цикл событий для этого потока
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
-        async def main():
-            # Установка команд для бота (опционально)
-            await bot.set_my_commands([
-                BotCommand(command="/start", description="Запустить бота"),
-                BotCommand(command="/help", description="Помощь")
-            ])
-            
-            # Запуск поллинга
-            await dp.start_polling(bot, skip_updates=True)
-        
-        asyncio.run(main())
+        # Запускаем поллинг
+        loop.run_until_complete(dp.start_polling(bot, skip_updates=True))
     except Exception as e:
         logging.error(f"Бот упал: {e}")
+        # Попытка перезапуска через несколько секунд
         time.sleep(5)
         run_bot()
 
@@ -49,6 +40,6 @@ if __name__ == "__main__":
     bot_thread = threading.Thread(target=run_bot, daemon=True)
     bot_thread.start()
     
-    # Запускаем Flask-сервер для поддержания работы на Render
-    port = int(os.environ.get("PORT", 5000))
+    # Запускаем Flask-сервер, который будет держать хост активным
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
