@@ -699,6 +699,10 @@ async def services_handler(call: CallbackQuery):
     await call.answer()
 
 
+# ============================================================
+# ПЛАТНЫЕ УСЛУГИ (FIX provider_token)
+# ============================================================
+
 @dp.callback_query(lambda call: call.data == "buy_pin")
 async def buy_pin(call: CallbackQuery):
     try:
@@ -707,6 +711,7 @@ async def buy_pin(call: CallbackQuery):
             title="📌 Закріплення поста",
             description="Закріплення вашого поста в каналі на 2 дні",
             payload="pin_post",
+            provider_token="",
             currency="XTR",
             prices=[LabeledPrice(label="Закріплення", amount=5)]
         )
@@ -723,6 +728,7 @@ async def buy_delete(call: CallbackQuery):
             title="🗑 Видалення поста",
             description="Видалення вашого поста з каналу",
             payload="delete_post",
+            provider_token="",
             currency="XTR",
             prices=[LabeledPrice(label="Видалення", amount=5)]
         )
@@ -739,6 +745,7 @@ async def vip_basic(call: CallbackQuery):
             title="💎 Базовий VIP",
             description="VIP на 2 дні + автопублікація + позначка VIP",
             payload="vip_basic",
+            provider_token="",
             currency="XTR",
             prices=[LabeledPrice(label="VIP Basic", amount=10)]
         )
@@ -755,13 +762,13 @@ async def vip_premium(call: CallbackQuery):
             title="👑 Premium VIP",
             description="VIP Premium: 2 дні + пріоритет + повторна публікація",
             payload="vip_premium",
+            provider_token="",
             currency="XTR",
             prices=[LabeledPrice(label="VIP Premium", amount=25)]
         )
     except Exception as e:
         await call.message.answer(f"❌ Помилка: {str(e)}")
     await call.answer()
-
 
 @dp.callback_query(lambda call: call.data == "vip_menu")
 async def vip_menu_handler(call: CallbackQuery):
