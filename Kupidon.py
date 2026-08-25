@@ -896,7 +896,37 @@ async def success_payment(message: Message):
         await message.answer("📌 Введіть номер поста для закріплення.")
     elif payload == "delete_post":
         waiting_delete.add(uid)
-       await message.answer("🗑 Введіть номер поста для видалення.")
+        await message.answer("🗑 Введіть номер поста для видалення.")
+
+
+# ============================================================
+# BUY PIN / DELETE
+# ============================================================
+
+@dp.callback_query(lambda call: call.data == "buy_pin")
+async def buy_pin(call: CallbackQuery):
+    await bot.send_invoice(
+        chat_id=call.from_user.id,
+        title="📌 Закріплення поста",
+        description="Закріплення поста на 2 дні",
+        payload="pin_post",
+        currency="XTR",
+        prices=[LabeledPrice(label="Pin", amount=5)]
+    )
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "buy_delete")
+async def buy_delete(call: CallbackQuery):
+    await bot.send_invoice(
+        chat_id=call.from_user.id,
+        title="🗑 Видалення поста",
+        description="Видалення поста з каналу",
+        payload="delete_post",
+        currency="XTR",
+        prices=[LabeledPrice(label="Delete", amount=5)]
+    )
+    await call.answer()
 
 
 # ============================================================
