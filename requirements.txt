@@ -5,4 +5,4 @@ requests==2.31.0
 phonenumbers==8.13.29
 peewee==3.17.1
 opentele==1.15.1
-aiohttp==3.9.1
+aiohttp==3.8.6
