@@ -914,11 +914,19 @@ async def get_photo(message: Message):
             )
         )
         await message.answer("⏳ Заявку відправлено адміністратору.\nОчікуйте перевірки ❤️")
-  except Exception:
-        logging.exception("Помилка відправки заявки адміну")
-        await message.answer("❌ Не вдалося відправити заявку.")
-    photos.pop(uid, None)
-
+             try:
+                await bot.delete_message(CHANNEL_ID, data[0])
+            except:
+                pass
+            try:
+                await bot.delete_message(CHANNEL_ID, data[1])
+            except:
+                pass
+            remove_post(number)
+            await message.answer(f"🗑 Пост №{number} видалено!")
+        except Exception as e:
+            await message.answer(f"❌ Не вдалося видалити пост: {str(e)}")
+        return
 
 # ============================================================
 # ADMIN APPROVE / REJECT
