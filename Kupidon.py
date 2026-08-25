@@ -825,41 +825,61 @@ async def reject(call: CallbackQuery):
     await call.message.edit_text("❌ ЗАЯВКУ ВІДХИЛЕНО")
     await call.answer("Заявку відхилено")
 
-
 # ============================================================
-# BUY PIN / DELETE
+# ПЛАТНЫЕ УСЛУГИ (FULL FIX)
 # ============================================================
 
+# ===== ОБРАБОТЧИК КНОПКИ "⭐ Послуги" =====
+@dp.callback_query(lambda call: call.data == "services")
+async def services_handler(call: CallbackQuery):
+    await call.message.delete()
+    await call.message.answer(
+        "⭐ **ПЛАТНІ ПОСЛУГИ:**\n\n"
+        "📌 **Закріпити анкету** — 5 ⭐\n"
+        "   Ваша анкета буде закріплена на 2 дні\n\n"
+        "🗑 **Видалити пост** — 5 ⭐\n"
+        "   Видалення вашого поста з каналу\n\n"
+        "💳 Оплата через Telegram Stars",
+        reply_markup=services_menu()
+    )
+    await call.answer()
+
+
+# ===== КНОПКА "КУПИТЬ ЗАКРЕП" =====
 @dp.callback_query(lambda call: call.data == "buy_pin")
 async def buy_pin(call: CallbackQuery):
-    await bot.send_invoice(
-        chat_id=call.from_user.id,
-        title="📌 Закріплення поста",
-        description="Закріплення поста на 2 дні",
-        payload="pin_post",
-        currency="XTR",
-        prices=[LabeledPrice(label="Pin", amount=5)]
-    )
+    try:
+        await bot.send_invoice(
+            chat_id=call.from_user.id,
+            title="📌 Закріплення поста",
+            description="Закріплення вашого поста в каналі на 2 дні",
+            payload="pin_post",
+            currency="XTR",
+            prices=[LabeledPrice(label="Закріплення", amount=5)]
+        )
+    except Exception as e:
+        await call.message.answer(f"❌ Помилка: {str(e)}")
     await call.answer()
 
 
+# ===== КНОПКА "КУПИТЬ УДАЛЕНИЕ" =====
 @dp.callback_query(lambda call: call.data == "buy_delete")
 async def buy_delete(call: CallbackQuery):
-    await bot.send_invoice(
-        chat_id=call.from_user.id,
-        title="🗑 Видалення поста",
-        description="Видалення поста з каналу",
-        payload="delete_post",
-        currency="XTR",
-        prices=[LabeledPrice(label="Delete", amount=5)]
-    )
+    try:
+        await bot.send_invoice(
+            chat_id=call.from_user.id,
+            title="🗑 Видалення поста",
+            description="Видалення вашого поста з каналу",
+            payload="delete_post",
+            currency="XTR",
+            prices=[LabeledPrice(label="Видалення", amount=5)]
+        )
+    except Exception as e:
+        await call.message.answer(f"❌ Помилка: {str(e)}")
     await call.answer()
 
 
-# ============================================================
-# PAYMENT
-# ============================================================
-
+# ===== ОБРАБОТЧИК ОПЛАТЫ =====
 @dp.pre_checkout_query()
 async def pre_checkout(query: PreCheckoutQuery):
     await bot.answer_pre_checkout_query(query.id, ok=True)
@@ -870,61 +890,21 @@ async def success_payment(message: Message):
     payload = message.successful_payment.invoice_payload
     uid = message.from_user.id
 
-    if payload == "vip_basic":
-        vip_users[uid] = ("basic", datetime.now() + timedelta(days=2))
-        set_role(uid, "vip")
-        await message.answer("💎 VIP Базовий активовано на 2 дні!")
-    elif payload == "vip_premium":
-        vip_users[uid] = ("premium", datetime.now() + timedelta(days=2))
-        set_role(uid, "vip")
-        await message.answer("👑 Premium VIP активовано на 2 дні!")
-    elif payload == "buy_mod":
-        set_role(uid, "moderator")
-        cur.execute("INSERT OR REPLACE INTO moderators(user_id, buy_date) VALUES(?, ?)", (uid, datetime.now().isoformat()))
-        db.commit()
-        await message.answer("👮 Ви тепер модератор!")
-    elif payload == "pin_post":
+    if payload == "pin_post":
         waiting_pin.add(uid)
-        await message.answer("📌 Введіть номер поста для закріплення.")
+        await message.answer(
+            "📌 **Введіть номер поста для закріплення.**\n\n"
+            "Напишіть просто цифру (наприклад: 15)"
+        )
     elif payload == "delete_post":
         waiting_delete.add(uid)
-        await message.answer("🗑 Введіть номер поста для видалення.")
+        await message.answer(
+            "🗑 **Введіть номер поста для видалення.**\n\n"
+            "Напишіть просто цифру (наприклад: 15)"
+        )
 
 
-# ============================================================
-# BUY PIN / DELETE
-# ============================================================
-
-@dp.callback_query(lambda call: call.data == "buy_pin")
-async def buy_pin(call: CallbackQuery):
-    await bot.send_invoice(
-        chat_id=call.from_user.id,
-        title="📌 Закріплення поста",
-        description="Закріплення поста на 2 дні",
-        payload="pin_post",
-        currency="XTR",
-        prices=[LabeledPrice(label="Pin", amount=5)]
-    )
-    await call.answer()
-
-
-@dp.callback_query(lambda call: call.data == "buy_delete")
-async def buy_delete(call: CallbackQuery):
-    await bot.send_invoice(
-        chat_id=call.from_user.id,
-        title="🗑 Видалення поста",
-        description="Видалення поста з каналу",
-        payload="delete_post",
-        currency="XTR",
-        prices=[LabeledPrice(label="Delete", amount=5)]
-    )
-    await call.answer()
-
-
-# ============================================================
-# ОБРАБОТКА НОМЕРОВ (PIN / DELETE)
-# ============================================================
-
+# ===== ОБРАБОТЧИК ВВОДА НОМЕРА ПОСТА =====
 @dp.message(F.text.regexp(r"^\d+$"))
 async def number_handler(message: Message):
     uid = message.from_user.id
@@ -933,115 +913,127 @@ async def number_handler(message: Message):
     except ValueError:
         return
 
+    # === ЗАКРЕПЛЕНИЕ ===
     if uid in waiting_pin:
         waiting_pin.remove(uid)
         data = get_post(number)
         if not data:
-            await message.answer("❌ Пост не знайдено.")
+            await message.answer("❌ Пост не знайдено. Перевірте номер.")
             return
         try:
             await bot.pin_chat_message(CHANNEL_ID, data[0])
-            await message.answer(f"📌 Пост №{number} закріплено на 2 дні.")
+            await message.answer(f"📌 Пост №{number} закріплено на 2 дні!")
+            
+            # Автоматическое открепление через 48 часов
             await asyncio.sleep(60 * 60 * 48)
             try:
                 await bot.unpin_chat_message(CHANNEL_ID, data[0])
             except:
                 pass
-        except Exception:
-            await message.answer("❌ Не вдалося закріпити пост.")
+        except Exception as e:
+            await message.answer(f"❌ Не вдалося закріпити пост: {str(e)}")
         return
 
+    # === УДАЛЕНИЕ ===
     if uid in waiting_delete:
         waiting_delete.remove(uid)
         data = get_post(number)
         if not data:
-            await message.answer("❌ Пост не знайдено.")
+            await message.answer("❌ Пост не знайдено. Перевірте номер.")
             return
         try:
             await bot.delete_message(CHANNEL_ID, data[0])
-        except:
-            pass
-        try:
             await bot.delete_message(CHANNEL_ID, data[1])
-        except:
-            pass
-        remove_post(number)
-        await message.answer(f"🗑 Пост №{number} видалено.")
+            remove_post(number)
+            await message.answer(f"🗑 Пост №{number} видалено!")
+        except Exception as e:
+            await message.answer(f"❌ Не вдалося видалити пост: {str(e)}")
         return
 
-# ============================================================
-# ОБРАБОТЧИКИ КНОПОК (ReplyKeyboard)
-# ============================================================
 
-@dp.message(F.text == "💌 Створити пару")
-async def create_pair(message: Message):
-    banned, until, reason = is_banned(message.from_user.id)
-    if banned:
-        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%m.%Y %H:%M')}")
-        return
-    
-    uid = message.from_user.id
-    photos[uid] = []
-    await message.answer(
-        "📸 Надішліть 2 фото:\n\n"
-        "1️⃣ Фото хлопця\n"
-        "2️⃣ Фото дівчини ❤️"
+# ===== КНОПКА "НАЗАД" =====
+@dp.callback_query(lambda call: call.data == "back")
+async def back_handler(call: CallbackQuery):
+    await call.message.delete()
+    await call.message.answer(
+        "💘 Головне меню:",
+        reply_markup=main_menu()
     )
+    await call.answer()
 
 
-@dp.message(F.text == "💎 VIP послуги")
-async def vip_services(message: Message):
-    banned, until, reason = is_banned(message.from_user.id)
-    if banned:
-        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%m.%Y %H:%M')}")
-        return
-    
-    await message.answer(
-        "💎 VIP ПОСЛУГИ:\n\n"
-        "💎 Базовий VIP — 10 ⭐\n"
-        "👑 Premium VIP — 25 ⭐\n\n"
-        "Натисніть кнопку нижче:",
+# ===== ОБРАБОТЧИК ДЛЯ VIP КНОПОК =====
+@dp.callback_query(lambda call: call.data == "vip_basic")
+async def vip_basic(call: CallbackQuery):
+    try:
+        await bot.send_invoice(
+            chat_id=call.from_user.id,
+            title="💎 Базовий VIP",
+            description="VIP на 2 дні + автопублікація + позначка VIP",
+            payload="vip_basic",
+            currency="XTR",
+            prices=[LabeledPrice(label="VIP Basic", amount=10)]
+        )
+    except Exception as e:
+        await call.message.answer(f"❌ Помилка: {str(e)}")
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "vip_premium")
+async def vip_premium(call: CallbackQuery):
+    try:
+        await bot.send_invoice(
+            chat_id=call.from_user.id,
+            title="👑 Premium VIP",
+            description="VIP Premium: 2 дні + пріоритет + повторна публікація",
+            payload="vip_premium",
+            currency="XTR",
+            prices=[LabeledPrice(label="VIP Premium", amount=25)]
+        )
+    except Exception as e:
+        await call.message.answer(f"❌ Помилка: {str(e)}")
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "vip_menu")
+async def vip_menu_handler(call: CallbackQuery):
+    await call.message.delete()
+    await call.message.answer(
+        "💎 **VIP ПОСЛУГИ:**\n\n"
+        "💎 **Базовий VIP** — 10 ⭐\n"
+        "   VIP на 2 дні + автопублікація\n\n"
+        "👑 **Premium VIP** — 25 ⭐\n"
+        "   VIP Premium на 2 дні + пріоритет\n\n"
+        "💳 Оплата через Telegram Stars",
         reply_markup=vip_menu()
     )
+    await call.answer()
 
 
-@dp.message(F.text == "⭐ Послуги")
-async def services_button(message: Message):
-    banned, until, reason = is_banned(message.from_user.id)
-    if banned:
-        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%m.%Y %H:%M')}")
-        return
-    
-    await message.answer(
-        "⭐ ПЛАТНІ ПОСЛУГИ:\n\n"
-        "📌 Закріпити анкету — 5 ⭐\n"
-        "🗑 Видалити пост — 5 ⭐\n\n"
-        "Натисніть кнопку нижче:",
-        reply_markup=services_menu()
-    )
-
-
-@dp.message(F.text == "📜 Правила")
-async def rules_button(message: Message):
-    await message.answer(
-        "📜 ПРАВИЛА:\n\n"
+# ===== ОБРАБОТЧИК ДЛЯ КНОПКИ "ПРАВИЛА" =====
+@dp.callback_query(lambda call: call.data == "rules")
+async def rules_handler(call: CallbackQuery):
+    await call.message.delete()
+    await call.message.answer(
+        "📜 **ПРАВИЛА:**\n\n"
         "🚫 Заборонено 18+\n"
         "🚫 Заборонено образи\n"
         "🚫 Заборонено спам\n"
         "❤️ Поважайте інших"
     )
-# ============================================================
-# BACK
-# ============================================================
-
-@dp.callback_query(lambda call: call.data == "back")
-async def back(call: CallbackQuery):
-    await call.message.answer("💘 Головне меню:", reply_markup=main_menu())
     await call.answer()
 
 
-# ============================================================
-# ЗАПУСК (через app.py)
-# ============================================================
-
-vip_users = {}
+# ===== ОБРАБОТЧИК ДЛЯ КНОПКИ "СТВОРИТИ ПАРУ" =====
+@dp.callback_query(lambda call: call.data == "create")
+async def create_handler(call: CallbackQuery):
+    uid = call.from_user.id
+    photos[uid] = []
+    await call.message.delete()
+    await call.message.answer(
+        "📸 **Надішліть 2 фото:**\n\n"
+        "1️⃣ Фото хлопця\n"
+        "2️⃣ Фото дівчини ❤️\n\n"
+        "Надішліть перше фото"
+    )
+    await call.answer()
