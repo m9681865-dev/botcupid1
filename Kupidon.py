@@ -102,6 +102,16 @@ CREATE TABLE IF NOT EXISTS probit_history(
 """)
 
 
+cur.execute("""
+CREATE TABLE IF NOT EXISTS bans(
+    user_id INTEGER PRIMARY KEY,
+    ban_until TEXT,
+    reason TEXT,
+    banned_by INTEGER
+)
+""")
+
+
 db.commit()
 
 
@@ -110,25 +120,13 @@ db.commit()
 # ============================================================
 
 def get_role(user_id):
-    cur.execute(
-        "SELECT role FROM users WHERE user_id=?",
-        (user_id,)
-    )
-
+    cur.execute("SELECT role FROM users WHERE user_id=?", (user_id,))
     row = cur.fetchone()
-
-    if row:
-        return row[0]
-
-    return "user"
+    return row[0] if row else "user"
 
 
 def set_role(user_id, role):
-    cur.execute(
-        "INSERT OR REPLACE INTO users(user_id, role) VALUES(?, ?)",
-        (user_id, role)
-    )
-
+    cur.execute("INSERT OR REPLACE INTO users(user_id, role) VALUES(?, ?)", (user_id, role))
     db.commit()
 
 
@@ -139,14 +137,62 @@ def is_owner(user_id):
 def is_moderator(user_id):
     if user_id == OWNER_ID:
         return True
-
-    role = get_role(user_id)
-
-    return role == "moderator"
+    return get_role(user_id) == "moderator"
 
 
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id == OWNER_ID
+
+
+# ============================================================
+# БАНЫ
+# ============================================================
+
+def ban_user(user_id, duration_seconds, reason="", banned_by=ADMIN_ID):
+    ban_until = (datetime.now() + timedelta(seconds=duration_seconds)).isoformat()
+    cur.execute("""
+        INSERT OR REPLACE INTO bans(user_id, ban_until, reason, banned_by)
+        VALUES(?, ?, ?, ?)
+    """, (user_id, ban_until, reason, banned_by))
+    db.commit()
+    return ban_until
+
+
+def unban_user(user_id):
+    cur.execute("DELETE FROM bans WHERE user_id=?", (user_id,))
+    db.commit()
+
+
+def is_banned(user_id):
+    cur.execute("SELECT ban_until, reason FROM bans WHERE user_id=?", (user_id,))
+    row = cur.fetchone()
+    if not row:
+        return False, None, None
+    ban_until_str, reason = row
+    ban_until = datetime.fromisoformat(ban_until_str)
+    if datetime.now() > ban_until:
+        unban_user(user_id)
+        return False, None, None
+    return True, ban_until, reason
+
+
+def get_all_bans():
+    cur.execute("SELECT user_id, ban_until, reason, banned_by FROM bans")
+    return cur.fetchall()
+
+
+def check_ban_decorator(func):
+    async def wrapper(message: Message, *args, **kwargs):
+        banned, until, reason = is_banned(message.from_user.id)
+        if banned:
+            await message.answer(
+                f"🚫 **ВИ ЗАБАНЕНІ!**\n\n"
+                f"📅 До: {until.strftime('%d.%m.%Y %H:%M')}\n"
+                f"📝 Причина: {reason or 'Не вказана'}"
+            )
+            return
+        return await func(message, *args, **kwargs)
+    return wrapper
 
 
 # ============================================================
@@ -157,7 +203,6 @@ def save_post(message_id_1, message_id_2, user_id, username=None, first_name=Non
     cur.execute("SELECT MAX(number) FROM posts")
     last = cur.fetchone()[0]
     number = 1 if last is None else last + 1
-
     cur.execute("""
         INSERT INTO posts(number, message_id_1, message_id_2, user_id, username, first_name, created_at)
         VALUES(?, ?, ?, ?, ?, ?, ?)
@@ -167,11 +212,7 @@ def save_post(message_id_1, message_id_2, user_id, username=None, first_name=Non
 
 
 def get_post(number):
-    cur.execute("""
-        SELECT message_id_1, message_id_2, user_id, username, first_name, created_at
-        FROM posts
-        WHERE number=?
-    """, (number,))
+    cur.execute("SELECT message_id_1, message_id_2, user_id, username, first_name, created_at FROM posts WHERE number=?", (number,))
     return cur.fetchone()
 
 
@@ -183,6 +224,8 @@ def remove_post(number):
 def get_all_posts():
     cur.execute("SELECT number, user_id, username, first_name, created_at FROM posts ORDER BY number DESC")
     return cur.fetchall()
+
+
 # ============================================================
 # ТЕКСТЫ
 # ============================================================
@@ -194,7 +237,6 @@ phrases = [
     "🌹 Купідон вже зробив свій постріл"
 ]
 
-
 wishes = [
     "💖 Бажаємо вам багато щасливих моментів!",
     "🥰 Нехай у вас все буде добре!",
@@ -202,34 +244,17 @@ wishes = [
     "❤️ Бережіть одне одного!"
 ]
 
-
-bad_words = [
-    "18+",
-    "секс",
-    "хуй",
-    "пизд",
-    "еб"
-]
+bad_words = ["18+", "секс", "хуй", "пизд", "еб"]
 
 
 # ============================================================
 # ПАМЯТЬ
 # ============================================================
 
-applications = {}
 photos = {}
 pending = {}
-
 waiting_delete = set()
 waiting_pin = set()
-
-write_channel = set()
-
-
-# ============================================================
-# АВТОМАТИЧЕСКОЕ ОДОБРЕНИЕ
-# ============================================================
-
 auto_approve = False
 
 
@@ -238,46 +263,24 @@ auto_approve = False
 # ============================================================
 
 def save_probit_history(user_id, query, result):
-    cur.execute(
-        """
+    cur.execute("""
         INSERT INTO probit_history(user_id, query, result, created_at)
         VALUES(?, ?, ?, ?)
-        """,
-        (user_id, query, json.dumps(result, ensure_ascii=False), datetime.now().isoformat())
-    )
+    """, (user_id, query, json.dumps(result, ensure_ascii=False), datetime.now().isoformat()))
     db.commit()
 
 
 def get_probit_history(user_id, limit=20):
-    cur.execute(
-        """
-        SELECT query, result, created_at
-        FROM probit_history
-        WHERE user_id=?
-        ORDER BY id DESC
-        LIMIT ?
-        """,
-        (user_id, limit)
-    )
+    cur.execute("SELECT query, result, created_at FROM probit_history WHERE user_id=? ORDER BY id DESC LIMIT ?", (user_id, limit))
     return cur.fetchall()
 
 
 async def collect_info(query):
     result = {
-        'query': query,
-        'type': 'unknown',
-        'tg_id': None,
-        'username': None,
-        'first_name': None,
-        'last_name': None,
-        'bio': None,
-        'premium': False,
-        'verified': False,
-        'scam': False,
-        'restricted': False,
-        'breaches': [],
-        'location': {},
-        'social': {}
+        'query': query, 'type': 'unknown', 'tg_id': None, 'username': None,
+        'first_name': None, 'last_name': None, 'bio': None,
+        'premium': False, 'verified': False, 'scam': False, 'restricted': False,
+        'breaches': [], 'location': {}, 'social': {}
     }
 
     if query.startswith('@'):
@@ -295,11 +298,8 @@ async def collect_info(query):
 
     if result.get('username'):
         try:
-            resp = requests.get(
-                f'https://t.me/{result["username"]}',
-                timeout=10,
-                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-            )
+            resp = requests.get(f'https://t.me/{result["username"]}', timeout=10,
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
             if resp.status_code == 200:
                 html = resp.text
                 name_match = re.search(r'<meta property="og:title" content="([^"]+)"', html)
@@ -330,12 +330,9 @@ async def collect_info(query):
                 data = resp.json()
                 if data.get('status') == 'success':
                     result['location'] = {
-                        'country': data.get('country'),
-                        'city': data.get('city'),
-                        'region': data.get('regionName'),
-                        'isp': data.get('isp'),
-                        'lat': data.get('lat'),
-                        'lon': data.get('lon')
+                        'country': data.get('country'), 'city': data.get('city'),
+                        'region': data.get('regionName'), 'isp': data.get('isp'),
+                        'lat': data.get('lat'), 'lon': data.get('lon')
                     }
         except:
             pass
@@ -351,7 +348,6 @@ async def collect_info(query):
             'Reddit': f'https://www.reddit.com/user/{result["username"]}',
             'LinkedIn': f'https://www.linkedin.com/in/{result["username"]}'
         }
-        
         for platform, url in social_platforms.items():
             try:
                 resp = requests.head(url, timeout=5)
@@ -365,9 +361,7 @@ async def collect_info(query):
 
 
 def format_probit_report(data):
-    output = f"🔍 <b>ПРОБИВ:</b> {data['query']}\n"
-    output += f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
-    
+    output = f"🔍 <b>ПРОБИВ:</b> {data['query']}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
     output += "🎯 <b>ОСНОВНАЯ ИНФОРМАЦИЯ:</b>\n"
     if data.get('type'):
         output += f"├ Тип: {data['type']}\n"
@@ -416,307 +410,17 @@ def format_probit_report(data):
         output += "\n"
     
     output += "📊 <b>ВЕРДИКТ:</b>\n"
-    if data.get('scam') or data.get('restricted'):
-        output += "⚠️ <b>АККАУНТ ПОДОЗРИТЕЛЬНЫЙ</b>"
-    else:
-        output += "✅ Аккаунт чистый"
-    
+    output += "⚠️ <b>АККАУНТ ПОДОЗРИТЕЛЬНЫЙ</b>" if data.get('scam') or data.get('restricted') else "✅ Аккаунт чистый"
     return output
 
 
 # ============================================================
-# КОМАНДА: /probit
+# МЕНЮ
 # ============================================================
 
-@dp.message(Command("probit"))
-async def probit_cmd(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("❌ Доступ запрещен. Только для администратора.")
-        return
-    
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        await message.answer(
-            "❌ Использование:\n"
-            "/probit <номер>\n"
-            "/probit @username\n"
-            "/probit https://t.me/username\n\n"
-            "Примеры:\n"
-            "/probit 79001234567\n"
-            "/probit @durov"
-        )
-        return
-    
-    query = args[1].strip()
-    status_msg = await message.answer(f"⏳ Ищу информацию по {query}...")
-    
-    try:
-        data = await collect_info(query)
-        report = format_probit_report(data)
-        
-        if len(report) > 4096:
-            parts = [report[i:i+4000] for i in range(0, len(report), 4000)]
-            for part in parts:
-                await message.answer(part, parse_mode='HTML')
-        else:
-            await status_msg.edit_text(report, parse_mode='HTML')
-            
-    except Exception as e:
-        await status_msg.edit_text(f'❌ Ошибка: {str(e)}')
-
-
-# ============================================================
-# КОМАНДА: /probit_post
-# ============================================================
-
-@dp.message(Command("probit_post"))
-async def probit_post_cmd(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("❌ Доступ запрещен. Только для администратора.")
-        return
-    
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        await message.answer(
-            "❌ Использование:\n"
-            "/probit_post <номер_поста>\n\n"
-            "Пример:\n"
-            "/probit_post 15"
-        )
-        return
-    
-    try:
-        post_number = int(args[1].strip())
-    except ValueError:
-        await message.answer("❌ Введите номер поста (число)")
-        return
-    
-    status_msg = await message.answer(f"⏳ Ищу пост №{post_number}...")
-    
-    try:
-        post_data = get_post(post_number)
-        
-        if not post_data:
-            await status_msg.edit_text(f"❌ Пост №{post_number} не найден")
-            return
-        
-        msg_id_1, msg_id_2, user_id, username, first_name, created_at = post_data
-        
-        query = username if username else str(user_id)
-        if username:
-            query = f"@{username}"
-        else:
-            query = str(user_id)
-        
-        data = await collect_info(query)
-        
-        data['post_number'] = post_number
-        data['post_created_at'] = created_at
-        
-        report = f"📌 <b>ПОСТ №{post_number}</b>\n"
-        report += f"📅 Создан: {created_at[:16]}\n"
-        report += f"👤 Автор: {first_name or 'Неизвестно'}\n"
-        if username:
-            report += f"├ Username: @{username}\n"
-        report += f"├ User ID: <code>{user_id}</code>\n\n"
-        report += "=" * 30 + "\n\n"
-        report += format_probit_report(data)
-        
-        if len(report) > 4096:
-            parts = [report[i:i+4000] for i in range(0, len(report), 4000)]
-            for part in parts:
-                await message.answer(part, parse_mode='HTML')
-        else:
-            await status_msg.edit_text(report, parse_mode='HTML')
-            
-    except Exception as e:
-        await status_msg.edit_text(f'❌ Ошибка: {str(e)}')
-
-
-# ============================================================
-# КОМАНДА: /all_posts
-# ============================================================
-
-@dp.message(Command("all_posts"))
-async def all_posts_cmd(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("❌ Доступ запрещен")
-        return
-    
-    posts = get_all_posts()
-    
-    if not posts:
-        await message.answer("📂 Постов нет")
-        return
-    
-    text = "📋 <b>ВСЕ ПОСТЫ:</b>\n\n"
-    for number, user_id, username, first_name, created_at in posts[:50]:
-        name = first_name or username or str(user_id)
-        text += f"├ №{number} — {name} ({created_at[:10]})\n"
-    
-    text += f"\nВсего: {len(posts)} постов"
-    await message.answer(text, parse_mode='HTML')
-
-
-# ============================================================
-# КОМАНДА: /history
-# ============================================================
-
-@dp.message(Command("history"))
-async def history_cmd(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("❌ Доступ запрещен")
-        return
-    
-    history = get_probit_history(ADMIN_ID, 20)
-    
-    if not history:
-        await message.answer("📂 История пробивов пуста")
-        return
-    
-    text = "📋 <b>ИСТОРИЯ ПРОБИВОВ (последние 20):</b>\n\n"
-    for i, (query, result, created_at) in enumerate(history, 1):
-        try:
-            data = json.loads(result) if result else {}
-            username = data.get('username', data.get('query', query))
-            text += f"{i}. <code>{username}</code> — {created_at[:16]}\n"
-        except:
-            text += f"{i}. <code>{query}</code> — {created_at[:16]}\n"
-    
-    await message.answer(text, parse_mode='HTML')
-
-
-# ============================================================
-# ГОЛОВНОЕ МЕНЮ
-# ============================================================
-
-def services_menu():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📌 Закріпити анкету — 5 ⭐",
-                    callback_data="buy_pin"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🗑 Видалити пост — 5 ⭐",
-                    callback_data="buy_delete"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="⬅️ Назад",
-                    callback_data="back"
-                )
-            ]
-        ]
-    )
-
-# ============================================================
-# VIP МЕНЮ
-# ============================================================
-
-def vip_menu():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="💎 Базовий VIP",
-                    callback_data="vip_basic"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="👑 Premium VIP",
-                    callback_data="vip_premium"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="⬅️ Назад",
-                    callback_data="back"
-                )
-            ]
-        ]
-    )
-
-
-# ============================================================
-# ПОСЛУГИ
-# ============================================================
-
-def services_menu():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📌 Закріпити анкету — 5 ⭐",
-                    callback_data="buy_pin"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🗑 Видалити пост — 5 ⭐",
-                    callback_data="buy_delete"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="⬅️ Назад",
-                    callback_data="back"
-                )
-            ]
-        ]
-    )
-
-
-# ============================================================
-# АДМИН-ПАНЕЛЬ
-# ============================================================
-
-def admin_menu():
-    status = (
-        "🟢 УВІМКНЕНО"
-        if auto_approve
-        else
-        "🔴 ВИМКНЕНО"
-    )
-
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=f"⚙️ Автоматичне схвалення: {status}",
-                    callback_data="auto_approve_menu"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🟢 Увімкнути автоматичне схвалення",
-                    callback_data="auto_approve_on"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🔴 Зупинити автоматичне схвалення",
-                    callback_data="auto_approve_off"
-                )
-            ]
-        ]
-    )
-
-
-# ============================================================
-# START
-# ============================================================
-
-@dp.message(Command("start"))
-async def start(message: Message):
+def main_menu():
     from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-    
-    keyboard = ReplyKeyboardMarkup(
+    return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="💌 Створити пару")],
             [KeyboardButton(text="💎 VIP послуги")],
@@ -725,12 +429,200 @@ async def start(message: Message):
         ],
         resize_keyboard=True
     )
-    
+
+
+def vip_menu():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💎 Базовий VIP", callback_data="vip_basic")],
+            [InlineKeyboardButton(text="👑 Premium VIP", callback_data="vip_premium")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back")]
+        ]
+    )
+
+
+def services_menu():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📌 Закріпити анкету — 5 ⭐", callback_data="buy_pin")],
+            [InlineKeyboardButton(text="🗑 Видалити пост — 5 ⭐", callback_data="buy_delete")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back")]
+        ]
+    )
+
+
+def admin_menu():
+    status = "🟢 УВІМКНЕНО" if auto_approve else "🔴 ВИМКНЕНО"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"⚙️ Автоматичне схвалення: {status}", callback_data="auto_approve_menu")],
+            [InlineKeyboardButton(text="🟢 Увімкнути", callback_data="auto_approve_on")],
+            [InlineKeyboardButton(text="🔴 Зупинити", callback_data="auto_approve_off")]
+        ]
+    )
+
+
+# ============================================================
+# КОМАНДА: /ban
+# ============================================================
+
+@dp.message(Command("ban"))
+async def ban_cmd(message: Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Доступ запрещен. Только для администратора.")
+        return
+
+    args = message.text.split(maxsplit=3)
+    if len(args) < 3:
+        await message.answer(
+            "❌ Использование:\n"
+            "/ban <user_id> <время> [причина]\n\n"
+            "Время: 1h, 2h, 5h, 1d, 7d, forever\n\n"
+            "Пример:\n"
+            "/ban 123456789 1h Спам"
+        )
+        return
+
+    try:
+        user_id = int(args[1])
+    except ValueError:
+        await message.answer("❌ Введите корректный ID пользователя")
+        return
+
+    duration_str = args[2].lower()
+    reason = args[3] if len(args) > 3 else "Без причины"
+
+    # Парсим время
+    duration_map = {
+        "1h": 3600,
+        "2h": 7200,
+        "5h": 18000,
+        "1d": 86400,
+        "7d": 604800,
+        "forever": 315360000  # 10 лет
+    }
+
+    if duration_str not in duration_map:
+        await message.answer("❌ Неверный формат времени. Доступно: 1h, 2h, 5h, 1d, 7d, forever")
+        return
+
+    duration = duration_map[duration_str]
+
+    # Проверяем, не забанен ли уже
+    banned, until, _ = is_banned(user_id)
+    if banned:
+        await message.answer(f"❌ Пользователь {user_id} уже забанен до {until.strftime('%d.%m.%Y %H:%M')}")
+        return
+
+    # Баним
+    ban_until = ban_user(user_id, duration, reason, message.from_user.id)
+    ban_date = datetime.fromisoformat(ban_until)
+
+    # Уведомляем пользователя
+    try:
+        await bot.send_message(
+            user_id,
+            f"🚫 **ВИ ЗАБАНЕНІ!**\n\n"
+            f"📅 До: {ban_date.strftime('%d.%m.%Y %H:%M')}\n"
+            f"📝 Причина: {reason}\n"
+            f"👤 Забанив: {message.from_user.first_name}"
+        )
+    except:
+        pass
+
+    await message.answer(
+        f"✅ **ПОЛЬЗОВАТЕЛЬ ЗАБАНЕН!**\n\n"
+        f"🆔 ID: {user_id}\n"
+        f"📅 До: {ban_date.strftime('%d.%m.%Y %H:%M')}\n"
+        f"📝 Причина: {reason}"
+    )
+
+
+# ============================================================
+# КОМАНДА: /unban
+# ============================================================
+
+@dp.message(Command("unban"))
+async def unban_cmd(message: Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Доступ запрещен. Только для администратора.")
+        return
+
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer("❌ Использование: /unban <user_id>")
+        return
+
+    try:
+        user_id = int(args[1])
+    except ValueError:
+        await message.answer("❌ Введите корректный ID пользователя")
+        return
+
+    if not is_banned(user_id)[0]:
+        await message.answer(f"❌ Пользователь {user_id} не забанен.")
+        return
+
+    unban_user(user_id)
+
+    try:
+        await bot.send_message(user_id, "✅ **ВИ РОЗБЛОКОВАНІ!** Тепер ви знову можете користуватися ботом.")
+    except:
+        pass
+
+    await message.answer(f"✅ **ПОЛЬЗОВАТЕЛЬ {user_id} РОЗБЛОКОВАНИЙ!**")
+
+
+# ============================================================
+# КОМАНДА: /banned_list
+# ============================================================
+
+@dp.message(Command("banned_list"))
+async def banned_list_cmd(message: Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Доступ запрещен. Только для администратора.")
+        return
+
+    bans = get_all_bans()
+    if not bans:
+        await message.answer("📂 Забаненных пользователей нет.")
+        return
+
+    text = "🚫 **СПИСОК ЗАБАНЕННЫХ:**\n\n"
+    for user_id, ban_until_str, reason, banned_by in bans[:20]:
+        ban_until = datetime.fromisoformat(ban_until_str)
+        text += f"├ 🆔 {user_id}\n"
+        text += f"├ 📅 До: {ban_until.strftime('%d.%m.%Y %H:%M')}\n"
+        text += f"├ 📝 {reason[:30]}\n"
+        text += f"└ 👤 Забанил: {banned_by}\n\n"
+
+    text += f"Всего: {len(bans)} пользователей"
+    await message.answer(text)
+
+
+# ============================================================
+# START
+# ============================================================
+
+@dp.message(Command("start"))
+async def start(message: Message):
+    # Проверка бана
+    banned, until, reason = is_banned(message.from_user.id)
+    if banned:
+        await message.answer(
+            f"🚫 **ВИ ЗАБАНЕНІ!**\n\n"
+            f"📅 До: {until.strftime('%d.%m.%Y %H:%M')}\n"
+            f"📝 Причина: {reason or 'Не вказана'}"
+        )
+        return
+
     await message.answer(
         "💘 Ласкаво просимо в Купідон!\n\n"
         "Створюй пари та знаходь кохання ❤️",
-        reply_markup=keyboard
+        reply_markup=main_menu()
     )
+
+
 # ============================================================
 # ADMIN
 # ============================================================
@@ -739,304 +631,67 @@ async def start(message: Message):
 async def admin_panel(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
-
-    status = (
-        "🟢 УВІМКНЕНО"
-        if auto_approve
-        else
-        "🔴 ВИМКНЕНО"
-    )
-
-    await message.answer(
-        "👑 АДМІН-ПАНЕЛЬ\n\n"
-        f"⚙️ Автоматичне схвалення: {status}",
-        reply_markup=admin_menu()
-    )
+    status = "🟢 УВІМКНЕНО" if auto_approve else "🔴 ВИМКНЕНО"
+    await message.answer(f"👑 АДМІН-ПАНЕЛЬ\n\n⚙️ Автоматичне схвалення: {status}", reply_markup=admin_menu())
 
 
 # ============================================================
 # АВТО-ОДОБРЕНИЕ
 # ============================================================
 
-@dp.callback_query(F.data == "auto_approve_menu")
+@dp.callback_query(lambda call: call.data == "auto_approve_menu")
 async def auto_approve_menu_handler(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
-
-    status = (
-        "🟢 УВІМКНЕНО"
-        if auto_approve
-        else
-        "🔴 ВИМКНЕНО"
-    )
-
-    await call.message.edit_text(
-        "⚙️ Налаштування автоматичного схвалення\n\n"
-        f"Статус: {status}",
-        reply_markup=admin_menu()
-    )
-
+    status = "🟢 УВІМКНЕНО" if auto_approve else "🔴 ВИМКНЕНО"
+    await call.message.edit_text(f"⚙️ Налаштування\n\nСтатус: {status}", reply_markup=admin_menu())
     await call.answer()
 
 
-@dp.callback_query(F.data == "auto_approve_on")
+@dp.callback_query(lambda call: call.data == "auto_approve_on")
 async def auto_approve_on(call: CallbackQuery):
     global auto_approve
-
     if call.from_user.id != ADMIN_ID:
         return
-
     auto_approve = True
-
-    await call.answer("Автоматичне схвалення увімкнено ✅")
-
-    await call.message.edit_text(
-        "🟢 АВТОМАТИЧНЕ СХВАЛЕННЯ УВІМКНЕНО!\n\n"
-        "Тепер нові заявки будуть автоматично "
-        "публікуватися в канал без ручної перевірки.",
-        reply_markup=admin_menu()
-    )
+    await call.answer("Увімкнено ✅")
+    await call.message.edit_text("🟢 АВТОМАТИЧНЕ СХВАЛЕННЯ УВІМКНЕНО!", reply_markup=admin_menu())
 
 
-@dp.callback_query(F.data == "auto_approve_off")
+@dp.callback_query(lambda call: call.data == "auto_approve_off")
 async def auto_approve_off(call: CallbackQuery):
     global auto_approve
-
     if call.from_user.id != ADMIN_ID:
         return
-
     auto_approve = False
-
-    await call.answer("Автоматичне схвалення зупинено 🔴")
-
-    await call.message.edit_text(
-        "🔴 АВТОМАТИЧНЕ СХВАЛЕННЯ ЗУПИНЕНО!\n\n"
-        "Нові заявки знову будуть надходити "
-        "адміністратору на ручну перевірку.",
-        reply_markup=admin_menu()
-    )
+    await call.answer("Зупинено 🔴")
+    await call.message.edit_text("🔴 АВТОМАТИЧНЕ СХВАЛЕННЯ ЗУПИНЕНО!", reply_markup=admin_menu())
 
 
 # ============================================================
 # RULES
 # ============================================================
 
-@dp.callback_query(F.data == "rules")
+@dp.callback_query(lambda call: call.data == "rules")
 async def rules(call: CallbackQuery):
     await call.message.answer(
         "📜 ПРАВИЛА:\n\n"
-        "🚫 Заборонено 18+\n"
-        "🚫 Заборонено образи\n"
-        "🚫 Заборонено спам\n"
-        "❤️ Поважайте інших"
+        "🚫 Заборонено 18+\n🚫 Заборонено образи\n🚫 Заборонено спам\n❤️ Поважайте інших"
     )
-
     await call.answer()
 
 
 # ============================================================
-# CREATE
+# VIP MENU
 # ============================================================
 
-@dp.callback_query(F.data == "create")
-async def create(call: CallbackQuery):
-    uid = call.from_user.id
-    photos[uid] = []
-
-    await call.message.answer(
-        "📸 Надішліть 2 фото:\n\n"
-        "1️⃣ Фото хлопця\n"
-        "2️⃣ Фото дівчини ❤️"
-    )
-
-    await call.answer()
-
-
-# ============================================================
-# ПОЛУЧЕНИЕ ФОТО
-# ============================================================
-
-@dp.message(F.photo)
-async def get_photo(message: Message):
-    uid = message.from_user.id
-
-    if uid not in photos:
-        photos[uid] = []
-
-    photos[uid].append(message.photo[-1].file_id)
-
-    if len(photos[uid]) > 2:
-        photos[uid] = photos[uid][:2]
-
-    if len(photos[uid]) < 2:
-        await message.answer(
-            "✅ Перше фото отримано!\n"
-            "Надішліть друге фото ❤️"
-        )
-        return
-
-    p1 = photos[uid][0]
-    p2 = photos[uid][1]
-
-    text = random.choice(phrases) + "\n\n" + random.choice(wishes)
-
-    pending[uid] = {"p1": p1, "p2": p2, "text": text}
-
-    if auto_approve:
-        try:
-            msg = await bot.send_media_group(
-                CHANNEL_ID,
-                media=[
-                    InputMediaPhoto(media=p1),
-                    InputMediaPhoto(media=p2, caption=text)
-                ]
-            )
-
-            number = save_post(
-    msg[0].message_id,
-    msg[1].message_id,
-    uid,
-    message.from_user.username,
-    message.from_user.first_name
-
-
-            )
-
-            await bot.edit_message_caption(
-                chat_id=CHANNEL_ID,
-                message_id=msg[1].message_id,
-                caption=text + f"\n\n🆔 Пост №{number}"
-            )
-
-            await message.answer(
-                "✅ Заявку автоматично схвалено!\n\n"
-                f"🆔 Пост №{number}\n"
-                "❤️ Анкету опубліковано."
-            )
-
-            pending.pop(uid, None)
-
-        except Exception as e:
-            logging.exception("Помилка автоматичного схвалення")
-            await message.answer("❌ Не вдалося автоматично опублікувати заявку.")
-
-        photos.pop(uid, None)
-        return
-
-    try:
-        await bot.send_message(ADMIN_ID, "👑 НОВА ЗАЯВКА НА ПАРУ")
-
-        await bot.send_media_group(
-            ADMIN_ID,
-            media=[
-                InputMediaPhoto(media=p1),
-                InputMediaPhoto(media=p2, caption=text)
-            ]
-        )
-
-        await bot.send_message(
-            ADMIN_ID,
-            "Оберіть дію:",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text="✅ Схвалити",
-                            callback_data=f"approve:{uid}"
-                        ),
-                        InlineKeyboardButton(
-                            text="❌ Відхилити",
-                            callback_data=f"reject:{uid}"
-                        )
-                    ]
-                ]
-            )
-        )
-
-        await message.answer(
-            "⏳ Заявку відправлено адміністратору.\n"
-            "Очікуйте перевірки ❤️"
-        )
-
-    except Exception:
-        logging.exception("Помилка відправки заявки адміну")
-        await message.answer("❌ Не вдалося відправити заявку.")
-
-    photos.pop(uid, None)
-
-
-# ============================================================
-# ADMIN APPROVE / REJECT
-# ============================================================
-
-@dp.callback_query(F.data.startswith("approve:"))
-async def approve(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-
-    try:
-        uid = int(call.data.split(":")[1])
-    except ValueError:
-        await call.answer("❌ Помилка заявки", show_alert=True)
-        return
-
-    data = pending.get(uid)
-
-    if not data:
-        await call.answer("❌ Заявка вже оброблена", show_alert=True)
-        return
-
-    try:
-        msg = await bot.send_media_group(
-            CHANNEL_ID,
-            media=[
-                InputMediaPhoto(media=data["p1"]),
-                InputMediaPhoto(media=data["p2"], caption=data["text"])
-            ]
-        )
-
-        user = await bot.get_chat(uid)
-
-        number = save_post(
-            msg[0].message_id,
-            msg[1].message_id,
-            uid,
-            user.username,
-            user.first_name
-        )
-
-        await bot.edit_message_caption(
-            chat_id=CHANNEL_ID,
-            message_id=msg[1].message_id,
-            caption=data["text"] + f"\n\n🆔 Пост №{number}"
-        )
-
-        await call.message.edit_text(
-            f"✅ ЗАЯВКА СХВАЛЕНА\n\n"
-            f"🆔 Пост №{number}\n"
-            "📢 Опубліковано в канал."
-        )
-
-        pending.pop(uid, None)
-
-    except Exception as e:
-        logging.exception("Помилка схвалення заявки")
-        await call.answer("❌ Помилка публікації", show_alert=True)
-
-# ============================================================
-# VIP
-# ============================================================
-
-vip_users = {}
-
-
-@dp.callback_query(F.data == "vip_menu")
+@dp.callback_query(lambda call: call.data == "vip_menu")
 async def vip_menu_handler(call: CallbackQuery):
     await call.message.answer("💎 VIP ПОСЛУГИ:", reply_markup=vip_menu())
     await call.answer()
 
 
-@dp.callback_query(F.data == "vip_basic")
+@dp.callback_query(lambda call: call.data == "vip_basic")
 async def vip_basic(call: CallbackQuery):
     await bot.send_invoice(
         chat_id=call.from_user.id,
@@ -1049,7 +704,7 @@ async def vip_basic(call: CallbackQuery):
     await call.answer()
 
 
-@dp.callback_query(F.data == "vip_premium")
+@dp.callback_query(lambda call: call.data == "vip_premium")
 async def vip_premium(call: CallbackQuery):
     await bot.send_invoice(
         chat_id=call.from_user.id,
@@ -1062,15 +717,149 @@ async def vip_premium(call: CallbackQuery):
     await call.answer()
 
 
-@dp.callback_query(F.data == "buy_mod")
-async def buy_mod(call: CallbackQuery):
+# ============================================================
+# SERVICES
+# ============================================================
+
+@dp.callback_query(lambda call: call.data == "services")
+async def services_handler(call: CallbackQuery):
+    await call.message.answer("⭐ ПЛАТНІ ПОСЛУГИ:", reply_markup=services_menu())
+    await call.answer()
+
+
+# ============================================================
+# CREATE
+# ============================================================
+
+@dp.callback_query(lambda call: call.data == "create")
+async def create(call: CallbackQuery):
+    uid = call.from_user.id
+    photos[uid] = []
+    await call.message.answer("📸 Надішліть 2 фото:\n\n1️⃣ Фото хлопця\n2️⃣ Фото дівчини ❤️")
+    await call.answer()
+
+
+# ============================================================
+# ПОЛУЧЕНИЕ ФОТО
+# ============================================================
+
+@dp.message(F.photo)
+async def get_photo(message: Message):
+    # Проверка бана
+    banned, until, reason = is_banned(message.from_user.id)
+    if banned:
+        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%m.%Y %H:%M')}")
+        return
+
+    uid = message.from_user.id
+    if uid not in photos:
+        photos[uid] = []
+    photos[uid].append(message.photo[-1].file_id)
+    if len(photos[uid]) > 2:
+        photos[uid] = photos[uid][:2]
+    if len(photos[uid]) < 2:
+        await message.answer("✅ Перше фото отримано!\nНадішліть друге фото ❤️")
+        return
+
+    p1, p2 = photos[uid][0], photos[uid][1]
+    text = random.choice(phrases) + "\n\n" + random.choice(wishes)
+    pending[uid] = {"p1": p1, "p2": p2, "text": text}
+
+    if auto_approve:
+        try:
+            msg = await bot.send_media_group(CHANNEL_ID, media=[InputMediaPhoto(media=p1), InputMediaPhoto(media=p2, caption=text)])
+            number = save_post(msg[0].message_id, msg[1].message_id, uid, message.from_user.username, message.from_user.first_name)
+            await bot.edit_message_caption(chat_id=CHANNEL_ID, message_id=msg[1].message_id, caption=text + f"\n\n🆔 Пост №{number}")
+            await message.answer(f"✅ Заявку автоматично схвалено!\n\n🆔 Пост №{number}\n❤️ Анкету опубліковано.")
+            pending.pop(uid, None)
+        except Exception as e:
+            logging.exception("Помилка автоматичного схвалення")
+            await message.answer("❌ Не вдалося автоматично опублікувати заявку.")
+        photos.pop(uid, None)
+        return
+
+    try:
+        await bot.send_message(ADMIN_ID, "👑 НОВА ЗАЯВКА НА ПАРУ")
+        await bot.send_media_group(ADMIN_ID, media=[InputMediaPhoto(media=p1), InputMediaPhoto(media=p2, caption=text)])
+        await bot.send_message(ADMIN_ID, "Оберіть дію:", reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="✅ Схвалити", callback_data=f"approve:{uid}"),
+                              InlineKeyboardButton(text="❌ Відхилити", callback_data=f"reject:{uid}")]]
+        ))
+        await message.answer("⏳ Заявку відправлено адміністратору.\nОчікуйте перевірки ❤️")
+    except Exception:
+        logging.exception("Помилка відправки заявки адміну")
+        await message.answer("❌ Не вдалося відправити заявку.")
+    photos.pop(uid, None)
+
+
+# ============================================================
+# ADMIN APPROVE / REJECT
+# ============================================================
+
+@dp.callback_query(lambda call: call.data.startswith("approve:"))
+async def approve(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    try:
+        uid = int(call.data.split(":")[1])
+    except ValueError:
+        await call.answer("❌ Помилка заявки", show_alert=True)
+        return
+    data = pending.get(uid)
+    if not data:
+        await call.answer("❌ Заявка вже оброблена", show_alert=True)
+        return
+    try:
+        msg = await bot.send_media_group(CHANNEL_ID, media=[InputMediaPhoto(media=data["p1"]), InputMediaPhoto(media=data["p2"], caption=data["text"])])
+        user = await bot.get_chat(uid)
+        number = save_post(msg[0].message_id, msg[1].message_id, uid, user.username, user.first_name)
+        await bot.edit_message_caption(chat_id=CHANNEL_ID, message_id=msg[1].message_id, caption=data["text"] + f"\n\n🆔 Пост №{number}")
+        await call.message.edit_text(f"✅ ЗАЯВКА СХВАЛЕНА\n\n🆔 Пост №{number}\n📢 Опубліковано в канал.")
+        pending.pop(uid, None)
+    except Exception as e:
+        logging.exception("Помилка схвалення заявки")
+        await call.answer("❌ Помилка публікації", show_alert=True)
+
+
+@dp.callback_query(lambda call: call.data.startswith("reject:"))
+async def reject(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    try:
+        uid = int(call.data.split(":")[1])
+    except ValueError:
+        return
+    pending.pop(uid, None)
+    await call.message.edit_text("❌ ЗАЯВКУ ВІДХИЛЕНО")
+    await call.answer("Заявку відхилено")
+
+
+# ============================================================
+# BUY PIN / DELETE
+# ============================================================
+
+@dp.callback_query(lambda call: call.data == "buy_pin")
+async def buy_pin(call: CallbackQuery):
     await bot.send_invoice(
         chat_id=call.from_user.id,
-        title="👮 Модератор",
-        description="Доступ до схвалення та відхилення заявок",
-        payload="buy_mod",
+        title="📌 Закріплення поста",
+        description="Закріплення поста на 2 дні",
+        payload="pin_post",
         currency="XTR",
-        prices=[LabeledPrice(label="Moderator", amount=100)]
+        prices=[LabeledPrice(label="Pin", amount=5)]
+    )
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "buy_delete")
+async def buy_delete(call: CallbackQuery):
+    await bot.send_invoice(
+        chat_id=call.from_user.id,
+        title="🗑 Видалення поста",
+        description="Видалення поста з каналу",
+        payload="delete_post",
+        currency="XTR",
+        prices=[LabeledPrice(label="Delete", amount=5)]
     )
     await call.answer()
 
@@ -1093,58 +882,21 @@ async def success_payment(message: Message):
         vip_users[uid] = ("basic", datetime.now() + timedelta(days=2))
         set_role(uid, "vip")
         await message.answer("💎 VIP Базовий активовано на 2 дні!")
-
     elif payload == "vip_premium":
         vip_users[uid] = ("premium", datetime.now() + timedelta(days=2))
         set_role(uid, "vip")
         await message.answer("👑 Premium VIP активовано на 2 дні!")
-
     elif payload == "buy_mod":
         set_role(uid, "moderator")
-        cur.execute(
-            "INSERT OR REPLACE INTO moderators(user_id, buy_date) VALUES(?, ?)",
-            (uid, datetime.now().isoformat())
-        )
+        cur.execute("INSERT OR REPLACE INTO moderators(user_id, buy_date) VALUES(?, ?)", (uid, datetime.now().isoformat()))
         db.commit()
-        await message.answer("👮 Ви тепер модератор!\n\nВам доступна робота із заявками.")
-
+        await message.answer("👮 Ви тепер модератор!")
     elif payload == "pin_post":
         waiting_pin.add(uid)
         await message.answer("📌 Введіть номер поста для закріплення.")
-
     elif payload == "delete_post":
         waiting_delete.add(uid)
-        await message.answer("🗑 Введіть номер поста для видалення.")
-
-
-# ============================================================
-# BUY PIN / DELETE
-# ============================================================
-
-@dp.callback_query(F.data == "buy_pin")
-async def buy_pin(call: CallbackQuery):
-    await bot.send_invoice(
-        chat_id=call.from_user.id,
-        title="📌 Закріплення поста",
-        description="Закріплення поста на 2 дні",
-        payload="pin_post",
-        currency="XTR",
-        prices=[LabeledPrice(label="Pin", amount=5)]
-    )
-    await call.answer()
-
-
-@dp.callback_query(F.data == "buy_delete")
-async def buy_delete(call: CallbackQuery):
-    await bot.send_invoice(
-        chat_id=call.from_user.id,
-        title="🗑 Видалення поста",
-        description="Видалення поста з каналу",
-        payload="delete_post",
-        currency="XTR",
-        prices=[LabeledPrice(label="Delete", amount=5)]
-    )
-    await call.answer()
+       await message.answer("🗑 Введіть номер поста для видалення.")
 
 
 # ============================================================
@@ -1200,19 +952,14 @@ async def number_handler(message: Message):
 # BACK
 # ============================================================
 
-@dp.callback_query(F.data == "back")
+@dp.callback_query(lambda call: call.data == "back")
 async def back(call: CallbackQuery):
     await call.message.answer("💘 Головне меню:", reply_markup=main_menu())
     await call.answer()
 
 
 # ============================================================
-# RUN
+# ЗАПУСК (через app.py)
 # ============================================================
 
-# ЗАПУСК ЧЕРЕЗ app.py (НЕ ТРОГАТЬ)
-# if __name__ == "__main__":
-#     try:
-#         asyncio.run(main())
-#     except KeyboardInterrupt:
-#         print("Бот зупинено.")
+vip_users = {}
