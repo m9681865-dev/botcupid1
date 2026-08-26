@@ -77,6 +77,17 @@ cur.execute("""CREATE TABLE IF NOT EXISTS bans(
     banned_by INTEGER
 )""")
 
+cur.execute("""CREATE TABLE IF NOT EXISTS appeals(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    username TEXT,
+    question TEXT,
+    answer TEXT,
+    status TEXT DEFAULT 'open',
+    created_at TEXT,
+    answered_at TEXT
+)""")
+
 db.commit()
 
 
@@ -154,49 +165,30 @@ def get_all_posts():
 
 
 phrases = [
-    "💘 СУДЬБА — ЭТО КОГДА ДВА ДАУНА ВСТРЕЧАЮТСЯ В ОДНОМ ЧАТЕ",
-    "❤️ НАДЕЮСЬ, ВЫ ОБА НАСТОЛЬКО ЖЕ ТУПЫЕ, ЧТОБЫ ПОНРАВИТЬСЯ ДРУГ ДРУГУ",
-    "🔥 ЕБАТЬ, КАКАЯ ПАРА! ОДИН ХУЙ РАЗВЕДУТСЯ ЧЕРЕЗ МЕСЯЦ",
-    "💀 ЭТА ПАРА ПРОЖИВЕТ ДОЛЬШЕ, ЧЕМ МОЙ АККАУНТ В ТЕЛЕГЕ",
-    "🤡 ВЫ ДВА — КАК ПИЗДЕЦ И КАТАСТРОФА. ИДЕАЛЬНАЯ ПАРА!",
-    "🍆 НУ ЧТО, ПОЕБЛИСЬ? А ПОТОМ РАЗБЕГИТЕСЬ, КАК ВСЕ НОРМАЛЬНЫЕ ЛЮДИ",
-    "👑 САМЫЙ ДОСТОЙНЫЙ ЛОХ И САМАЯ КРИНЖОВАЯ ТЕЛКА. ИДЕАЛ",
-    "💔 ВАШ ЛЮБОВНЫЙ ГОРИЗОНТ — ЭТО ЗАЛЕТ И АЛИМЕНТЫ НА 18 ЛЕТ",
-    "🥵 СТОЛЬКО ХИМИИ, ЧТО ДАЖЕ МЕНДЕЛЕЕВ ОБОСРАЛСЯ",
-    "🐒 ВЫ КАК ДВЕ ОБЕЗЬЯНЫ В ЗООПАРКЕ — ВСЕ СМОТРЯТ И РЖУТ",
-    "💎 ВЫ — КАК ПРЕМИУМ-ПОДПИСКА: ВСЕ ХОТЯТ, НО НИКТО НЕ ПОНИМАЕТ, ЗАЧЕМ",
-    "🤝 ЕБАТЬ ВЫ СОВМЕСТИМЫ! ОБА ШИЗОИДЫ, ОБА НЕ УМЕЕТЕ ГОТОВИТЬ",
-    "💀 ТВОЙ БЫВШИЙ УЖЕ РАД, ЧТО ТЫ УШЛА. ЭТОТ ЕЩЕ ХУЖЕ",
-    "🎯 ТЫ НАШЕЛ ТУ САМУЮ, КОТОРАЯ БУДЕТ ТРЕБОВАТЬ ДЕНЬГИ НА НОГТИ",
-    "🏆 ВЫ ПОБЕДИТЕЛИ В НОМИНАЦИИ 'САМЫЙ ТОКСИЧНЫЙ ТГК'",
-    "🍺 ВАША ЛЮБОВЬ — КАК ПИВО: ДЕШЕВО, БЫСТРО И С УТРА БОЛИТ ГОЛОВА",
-    "🚬 ЗНАКОМСТВО ЧЕРЕЗ КУПИДОНА — ЭТО КАК КУРИТЬ НА БАЛКОНЕ: ВСЕ ВИДЯТ, НО ВСЕ РАВНО"
+    "💘 Судьба свела двух незнакомцев... или это просто глюк телеги?"
 ]
 
 wishes = [
-    "💩 Я ЖЕЛАЮ ВАМ НЕ ПОССОРИТЬСЯ В ПЕРВЫЙ ЖЕ ВЕЧЕР, НО ХУЙ ТАМ",
-    "🥂 Я ЖЕЛАЮ, ЧТОБЫ ВЫ ХОТЬ РАЗ ЗАХОТЕЛИ ДРУГ ДРУГА БЕЗ АЛКОГОЛЯ",
-    "💀 ЖЕЛАЮ, ЧТОБЫ ВЫ НЕ УБИЛИ ДРУГ ДРУГА В ПЕРВУЮ ЖЕ НЕДЕЛЮ",
-    "🤡 Я ЖЕЛАЮ ВАМ СЧАСТЬЯ, НО МЫ ВСЕ ЗНАЕМ, ЧЕМ ЭТО КОНЧИТСЯ",
-    "🍆 ЖЕЛАЮ, ЧТОБЫ ВЫ БЫЛИ ДРУГ ДРУГУ НЕ ТОЛЬКО В СЕКСЕ, НО И В ГОЛОВЕ",
-    "💔 ЖЕЛАЮ, ЧТОБЫ ВЫ РАЗБЕЖАЛИСЬ ДО ТОГО, КАК ОНО СТАНЕТ БОЛЬНО",
-    "🎉 ЖЕЛАЮ, ЧТОБЫ ВАШИ ДРУЗЬЯ НЕ ОБОСРАЛИСЬ, КОГДА УВИДЯТ ВАС ВМЕСТЕ",
-    "🔥 ЖЕЛАЮ, ЧТОБЫ ВЫ ХОТЬ РАЗ ПОГОВОРИЛИ О ЧЕМ-ТО, КРОМЕ СЕКСА",
-    "🖕 ЖЕЛАЮ, ЧТОБЫ ВЫ НЕ ПОЖАЛЕЛИ ОБ ЭТОМ ЗНАКОМСТВЕ. НО ПОЖАЛЕЕТЕ",
-    "💀 ЖЕЛАЮ, ЧТОБЫ ВАШИ БЫВШИЕ НЕ НАПИСАЛИ В ЛИЧКУ С ПРЕДЛОЖЕНИЕМ",
-    "🤝 ЖЕЛАЮ, ЧТОБЫ ВЫ ХОТЬ РАЗ УЛЫБНУЛИСЬ ДРУГ ДРУГУ, А НЕ В ТЕЛЕФОН",
-    "🐒 ЖЕЛАЮ, ЧТОБЫ ВЫ БЫЛИ ТАКИМИ ЖЕ КРИНЖОВЫМИ, КАК В ЭТОМ ПОСТЕ",
-    "🍺 ЖЕЛАЮ, ЧТОБЫ ВЫ ЗАПОМНИЛИ ЭТОТ МОМЕНТ, КОГДА БУДЕТЕ ДЕЛИТЬ ИМУЩЕСТВО",
-    "💸 ЖЕЛАЮ, ЧТОБЫ ВЫ ТРАТИЛИ ДЕНЬГИ ДРУГ НА ДРУГА, А НЕ НА ПСИХОТЕРАПЕВТОВ",
-    "🎯 ЖЕЛАЮ, ЧТОБЫ ВЫ ПОПАЛИ В ЦЕЛЬ, А НЕ В ГЛАЗ ДРУГ ДРУГУ",
-    "⚡ ЖЕЛАЮ, ЧТОБЫ ВАША ЛЮБОВЬ ДЛИЛАСЬ ДОЛЬШЕ, ЧЕМ ЗАРЯД ТЕЛЕФОНА",
-    "🔥 ЖЕЛАЮ, ЧТОБЫ ВЫ ГОРЕЛИ ДРУГ ОТ ДРУГА, А НЕ В АДУ ПОСЛЕ СМЕРТИ"
+    "🔥 Нехай цей вечір запам'ятається надовго!",
+    "❤️ Сподіваюся, ви знайдете спільну мову!",
+    "💀 Готуйтеся до найцікавішого!",
+    "🎉 Удачі вам обом!",
+    "💎 Ви — як преміум-підписка: всі хочуть, але не всі готові платити",
+    "🤝 Ці двоє точно знайдуть спільну мову!",
+    "🍺 Нехай ваше знайомство буде міцним, як хороша кава!",
+    "🔥 Сподіваюся, ви не пошкодуєте про свій вибір!",
+    "💘 Нехай цей день стане початком чогось більшого!",
+    "🤡 Або просто початком нового мему...",
+    "🎯 Ви потрапили в саме серце цього чату!",
+    "⚡ Ваша зустріч — це як спалах блискавки!",
+    "💩 Я бажаю вам не посваритися в перший же вечір..."
 ]
 
 photos = {}
 pending = {}
 waiting_delete = set()
 waiting_pin = set()
+waiting_question = set()
 auto_approve = False
 vip_users = {}
 
@@ -356,7 +348,8 @@ def main_menu():
             [KeyboardButton(text="💌 Створити пару")],
             [KeyboardButton(text="💎 VIP послуги")],
             [KeyboardButton(text="⭐ Послуги")],
-            [KeyboardButton(text="📜 Правила")]
+            [KeyboardButton(text="📜 Правила")],
+            [KeyboardButton(text="❓ Питання до адміна")]
         ],
         resize_keyboard=True
     )
@@ -592,6 +585,119 @@ async def banned_list_cmd(message: Message):
     await message.answer(text)
 
 
+@dp.message(Command("appeals"))
+async def list_appeals(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ Доступ заборонено. Тільки для адміністратора.")
+        return
+    cur.execute("""
+        SELECT id, user_id, username, question, status, created_at
+        FROM appeals
+        ORDER BY id DESC
+        LIMIT 20
+    """)
+    appeals = cur.fetchall()
+    if not appeals:
+        await message.answer("📂 Немає звернень.")
+        return
+    text = "📩 **СПИСОК ЗВЕРНЕНЬ (останні 20):**\n\n"
+    for appeal in appeals:
+        appeal_id, user_id, username, question, status, created_at = appeal
+        status_emoji = "🟢 Відкрите" if status == "open" else "🔒 Закрите"
+        text += f"#{appeal_id} | {status_emoji}\n"
+        text += f"├ 👤 {username or user_id}\n"
+        text += f"├ 📝 {question[:50]}...\n"
+        text += f"└ 📅 {created_at[:16]}\n\n"
+    await message.answer(text)
+
+
+@dp.message(Command("appeal"))
+async def view_appeal(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ Доступ заборонено. Тільки для адміністратора.")
+        return
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer("❌ Використання: /appeal <id_звернення>")
+        return
+    try:
+        appeal_id = int(args[1])
+    except ValueError:
+        await message.answer("❌ Введіть правильний ID (число).")
+        return
+    cur.execute("""
+        SELECT id, user_id, username, question, answer, status, created_at, answered_at
+        FROM appeals
+        WHERE id=?
+    """, (appeal_id,))
+    appeal = cur.fetchone()
+    if not appeal:
+        await message.answer("❌ Звернення не знайдено.")
+        return
+    appeal_id, user_id, username, question, answer, status, created_at, answered_at = appeal
+    text = f"📩 **ЗВЕРНЕННЯ #{appeal_id}**\n\n"
+    text += f"👤 Користувач: {username or user_id}\n"
+    text += f"🆔 ID: {user_id}\n"
+    text += f"📅 Створено: {created_at[:16]}\n"
+    text += f"📝 Питання: {question}\n"
+    if status == "closed":
+        text += f"💬 Відповідь: {answer}\n"
+        text += f"📅 Відповідь: {answered_at[:16] if answered_at else 'невідомо'}\n"
+    text += f"\nСтатус: {'🟢 Відкрите' if status == 'open' else '🔒 Закрите'}"
+    if status == "open":
+        text += f"\n\nЩоб відповісти: /answer {appeal_id} <текст>"
+    await message.answer(text)
+
+
+@dp.message(Command("answer"))
+async def answer_appeal(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ Доступ заборонено. Тільки для адміністратора.")
+        return
+    args = message.text.split(maxsplit=2)
+    if len(args) < 3:
+        await message.answer(
+            "❌ Використання: /answer <id_звернення> <відповідь>\n\n"
+            "Приклад: /answer 5 Дякую за питання, ми виправимо цю помилку!"
+        )
+        return
+    try:
+        appeal_id = int(args[1])
+    except ValueError:
+        await message.answer("❌ Введіть правильний ID звернення (число).")
+        return
+    answer_text = args[2].strip()
+    cur.execute("SELECT user_id, question FROM appeals WHERE id=? AND status='open'", (appeal_id,))
+    appeal = cur.fetchone()
+    if not appeal:
+        await message.answer("❌ Звернення не знайдено або вже закрите.")
+        return
+    user_id, question = appeal
+    cur.execute("""
+        UPDATE appeals 
+        SET answer=?, status='closed', answered_at=?
+        WHERE id=?
+    """, (answer_text, datetime.now().isoformat(), appeal_id))
+    db.commit()
+    try:
+        await bot.send_message(
+            user_id,
+            f"📩 **ВІДПОВІДЬ НА ВАШЕ ПИТАННЯ**\n\n"
+            f"🆔 Звернення: #{appeal_id}\n"
+            f"📝 Ваше питання: {question}\n\n"
+            f"💬 Відповідь адміна:\n{answer_text}\n\n"
+            f"✅ Звернення закрито."
+        )
+    except:
+        pass
+    await message.answer(
+        f"✅ **ВІДПОВІДЬ НАДІСЛАНО!**\n\n"
+        f"🆔 Звернення: #{appeal_id}\n"
+        f"📝 Відповідь: {answer_text}\n\n"
+        f"Статус: 🔒 Закрито"
+    )
+
+
 @dp.message(F.text == "💌 Створити пару")
 async def create_pair(message: Message):
     banned, until, reason = is_banned(message.from_user.id)
@@ -628,6 +734,52 @@ async def rules_button(message: Message):
     await message.answer("📜 **ПРАВИЛА:**\n\n🚫 Заборонено 18+\n🚫 Заборонено образи\n🚫 Заборонено спам\n❤️ Поважайте інших")
 
 
+@dp.message(F.text == "❓ Питання до адміна")
+async def ask_admin(message: Message):
+    banned, until, reason = is_banned(message.from_user.id)
+    if banned:
+        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%m.%Y %H:%M')}")
+        return
+    await message.answer(
+        "❓ **Напишіть своє питання адміністратору.**\n\n"
+        "Відповідь прийде в цей чат, коли адмін її напише.\n"
+        "Можна писати будь-які питання щодо роботи бота."
+    )
+    waiting_question.add(message.from_user.id)
+
+
+@dp.message(F.text)
+async def handle_question(message: Message):
+    uid = message.from_user.id
+    if uid in waiting_question:
+        waiting_question.remove(uid)
+        if len(message.text.strip()) < 5:
+            await message.answer("❌ Питання має бути довшим за 5 символів.")
+            return
+        cur.execute("""
+            INSERT INTO appeals(user_id, username, question, created_at)
+            VALUES(?, ?, ?, ?)
+        """, (uid, message.from_user.username or "без ніка", message.text, datetime.now().isoformat()))
+        db.commit()
+        appeal_id = cur.lastrowid
+        await message.answer(
+            f"✅ Ваше питання відправлено адміністратору!\n"
+            f"🆔 Номер звернення: #{appeal_id}\n"
+            f"⏳ Очікуйте відповіді."
+        )
+        await bot.send_message(
+            ADMIN_ID,
+            f"📩 **НОВЕ ПИТАННЯ!**\n\n"
+            f"🆔 Звернення: #{appeal_id}\n"
+            f"👤 Користувач: {message.from_user.first_name} (@{message.from_user.username or 'без ніка'})\n"
+            f"🆔 ID: {uid}\n"
+            f"📝 Питання: {message.text}\n\n"
+            f"Відповісти: /answer {appeal_id} <текст>"
+        )
+        return
+    await message.answer("💘 Використовуйте кнопки меню:", reply_markup=main_menu())
+
+
 @dp.message(F.photo)
 async def get_photo(message: Message):
     banned, until, reason = is_banned(message.from_user.id)
@@ -646,7 +798,7 @@ async def get_photo(message: Message):
         return
 
     p1, p2 = photos[uid][0], photos[uid][1]
-    text = random.choice(phrases) + "\n\n" + random.choice(wishes)
+    text = random.choice(wishes)
     pending[uid] = {"p1": p1, "p2": p2, "text": text}
 
     if auto_approve:
