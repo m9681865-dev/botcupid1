@@ -1271,7 +1271,7 @@ async def success_payment(message: Message):
     elif payload == "delete_post":
         waiting_delete[uid] = {
             "timestamp": datetime.now(),
-            "status": "waiting_for_number"
+            "status": "waiting"
         }
         await message.answer(
             "🗑 **Введіть номер поста для видалення.**\n\n"
@@ -1295,7 +1295,7 @@ async def auto_cancel_delete(user_id: int):
             pass
 
 
-# ============= ОБРАБОТКА ЧИСЕЛ (УДАЛЕНИЕ ЛЮБОГО ПОСТА) =============
+# ============= ОБРАБОТКА ЧИСЕЛ (УДАЛЕНИЕ) =============
 @dp.message(F.text.regexp(r"^\d+$"))
 async def number_handler(message: Message):
     uid = message.from_user.id
@@ -1303,98 +1303,60 @@ async def number_handler(message: Message):
         number = int(message.text)
     except ValueError:
         return
-    
-    # ========== ВИДАЛЕННЯ ПОСТА (ЛЮБОГО) ==========
+
+    # ========== ВИДАЛЕННЯ ПОСТА ==========
     if uid in waiting_delete:
         del waiting_delete[uid]
-        
-        # ПРЯМОЙ ЗАПРОС В БАЗУ
-        try:
-            cur.execute("SELECT message_id_1, message_id_2, user_id, username, first_name, created_at FROM posts WHERE number=?", (number,))
-            post_data = cur.fetchone()
-        except Exception as e:
-            await message.answer(f"❌ Ошибка БД: {e}")
+
+        # ПОЛУЧАЕМ ПОСТ ИЗ БАЗЫ
+        cur.execute("SELECT message_id_1, message_id_2 FROM posts WHERE number=?", (number,))
+        row = cur.fetchone()
+
+        if not row:
+            await message.answer(f"❌ Пост №{number} НЕ СУЩЕСТВУЕТ В БАЗЕ ДАННЫХ!\n\nПроверь через /all_posts")
             return
-        
-        if not post_data:
-            await message.answer(
-                f"❌ **Пост №{number} не знайдено в базі даних.**\n\n"
-                f"Перевірте номер. Доступні пости:\n"
-                f"/all_posts"
-            )
-            return
-        
-        msg_id_1 = post_data[0]
-        msg_id_2 = post_data[1]
-        post_user_id = post_data[2]
-        username = post_data[3]
-        first_name = post_data[4]
-        
-        await message.answer(f"⏳ Видаляю пост №{number}...")
-        
-        deleted_count = 0
+
+        msg1, msg2 = row
+
+        # УДАЛЯЕМ
+        deleted = 0
         errors = []
-        
-        # УДАЛЯЕМ ПЕРВОЕ СООБЩЕНИЕ
+
         try:
-            await bot.delete_message(chat_id=CHANNEL_ID, message_id=msg_id_1)
-            deleted_count += 1
-            await message.answer(f"✅ Удалено сообщение 1 (ID: {msg_id_1})")
+            await bot.delete_message(chat_id=CHANNEL_ID, message_id=msg1)
+            deleted += 1
         except Exception as e:
-            errors.append(f"Сообщение 1: {str(e)}")
-            await message.answer(f"❌ Ошибка удаления 1: {str(e)}")
-        
-        # УДАЛЯЕМ ВТОРОЕ СООБЩЕНИЕ
+            errors.append(f"Сообщение 1 (ID: {msg1}): {str(e)}")
+
         try:
-            await bot.delete_message(chat_id=CHANNEL_ID, message_id=msg_id_2)
-            deleted_count += 1
-            await message.answer(f"✅ Удалено сообщение 2 (ID: {msg_id_2})")
+            await bot.delete_message(chat_id=CHANNEL_ID, message_id=msg2)
+            deleted += 1
         except Exception as e:
-            errors.append(f"Сообщение 2: {str(e)}")
-            await message.answer(f"❌ Ошибка удаления 2: {str(e)}")
-        
+            errors.append(f"Сообщение 2 (ID: {msg2}): {str(e)}")
+
         # УДАЛЯЕМ ИЗ БАЗЫ
         try:
             cur.execute("DELETE FROM posts WHERE number=?", (number,))
             db.commit()
-            await message.answer("✅ Пост удален из базы данных")
         except Exception as e:
             errors.append(f"База данных: {str(e)}")
-            await message.answer(f"❌ Ошибка удаления из БД: {str(e)}")
-        
-        # ЛОГИРУЕМ
-        try:
-            cur.execute("""INSERT INTO delete_logs(post_number, user_id, username, deleted_at, status)
-                           VALUES(?, ?, ?, ?, ?)""",
-                        (number, uid, message.from_user.username or "без ніка", 
-                         datetime.now().isoformat(), "deleted" if deleted_count == 2 else "partial"))
-            db.commit()
-        except:
-            pass
-        
-        # ИТОГ
-        if deleted_count == 2:
-            await message.answer(
-                f"✅ **ПОСТ №{number} ПОВНІСТЮ ВИДАЛЕНО!**\n\n"
-                f"🗑 З каналу: 2/2\n"
-                f"🗄 З бази: ✅\n\n"
-                f"❤️ Дякуємо!"
-            )
-        elif deleted_count == 1:
-            await message.answer(
-                f"⚠️ **ПОСТ №{number} ВИДАЛЕНО ЧАСТКОВО**\n\n"
-                f"🗑 З каналу: 1/2\n"
-                f"🗄 З бази: ✅\n\n"
-                f"❌ Помилка: {errors[0] if errors else 'Неизвестно'}"
-            )
+
+        # ОТВЕТ
+        if deleted == 2:
+            await message.answer(f"✅ **ПОСТ №{number} ПОВНІСТЮ ВИДАЛЕНО!**")
+        elif deleted == 1:
+            await message.answer(f"⚠️ **ПОСТ №{number} ВИДАЛЕНО ЧАСТКОВО**\n\nУдалено: 1/2\nОшибка: {errors[0]}")
         else:
             await message.answer(
                 f"❌ **ПОСТ №{number} НЕ ВИДАЛЕНО**\n\n"
-                f"Помилки:\n" + "\n".join(errors) + "\n\n"
-                f"🔧 Проверьте права бота в канале через /check_channel"
+                f"Ошибки:\n" + "\n".join(errors) + "\n\n"
+                f"🔧 Проверьте:\n"
+                f"1. Бот админ в канале? ✅\n"
+                f"2. Права на удаление есть? ✅\n"
+                f"3. ID канала правильный? {CHANNEL_ID}"
             )
         return
-    
+
     # ========== ЗАКРІПЛЕННЯ ==========
     if uid in waiting_pin:
         waiting_pin.remove(uid)
@@ -1408,7 +1370,7 @@ async def number_handler(message: Message):
         except Exception as e:
             await message.answer(f"❌ {e}")
         return
-    
+
     await message.answer("❌ Немає активних операцій для цього номера.")
 
 
