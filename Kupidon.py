@@ -1120,23 +1120,27 @@ async def number_handler(message: Message):
         except Exception as e:
             await message.answer(f"❌ Не вдалося закріпити пост: {str(e)}")
         return
-    if uid in waiting_delete:
-        waiting_delete.remove(uid)
-        data = get_post(number)
-        if not data:
-            await message.answer("❌ Пост не знайдено. Перевірте номер.")
-            return
-        try:
-            await bot.delete_message(CHANNEL_ID, data[0])
-        except:
-            pass
-        try:
-            await bot.delete_message(CHANNEL_ID, data[1])
-        except:
-            pass
-      remove_post(number)
-        await message.answer(f"🗑 Пост №{number} видалено!")
+  if uid in waiting_delete:
+    waiting_delete.remove(uid)
+    data = get_post(number)
+
+    if not data:
+        await message.answer("❌ Пост не знайдено. Перевірте номер.")
         return
+
+    try:
+        await bot.delete_message(CHANNEL_ID, data[0])
+    except:
+        pass
+
+    try:
+        await bot.delete_message(CHANNEL_ID, data[1])
+    except:
+        pass
+
+    remove_post(number)
+    await message.answer(f"🗑 Пост №{number} видалено!")
+    return
 
 
 async def health(_: web.Request) -> web.Response:
@@ -1150,19 +1154,25 @@ async def start_web_server() -> web.AppRunner:
 
     # Render provides this value at runtime; 10000 is for local development.
     port = int(os.getenv("PORT", "10000"))
+
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=port)
+
+    site = web.TCPSite(
+        runner,
+        host="0.0.0.0",
+        port=port
+    )
     await site.start()
+
     logging.info("Health server listening on port %s", port)
     return runner
 
 
 async def main() -> None:
     runner = await start_web_server()
+
     try:
-        # aiohttp and aiogram polling share one asyncio event loop, so neither
-        # blocks the other and the health endpoint remains available.
         await dp.start_polling(bot)
     finally:
         await runner.cleanup()
