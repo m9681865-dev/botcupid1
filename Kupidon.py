@@ -52,10 +52,6 @@ except Exception:
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 cur = db.cursor()
 
-# Проверяем, существует ли база
-cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='posts'")
-table_exists = cur.fetchone()
-
 # Создаем таблицы
 cur.execute("""CREATE TABLE IF NOT EXISTS posts(
     number INTEGER PRIMARY KEY,
@@ -761,4 +757,6 @@ async def rules_button(message: Message):
 
 @dp.message(F.text == "❓ Питання до адміна")
 async def ask_admin(message: Message):
-    banned, until, reason = is
+    banned, until, reason = is_banned(message.from_user.id)
+    if banned:
+        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%
