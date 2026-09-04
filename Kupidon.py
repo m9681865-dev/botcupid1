@@ -759,4 +759,443 @@ async def rules_button(message: Message):
 async def ask_admin(message: Message):
     banned, until, reason = is_banned(message.from_user.id)
     if banned:
-        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%
+        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%m.%Y %H:%M')}")
+        return
+    await message.answer(
+        "❓ **Напишіть своє питання адміністратору.**\n\n"
+        "Відповідь прийде в цей чат, коли адмін її напише.\n"
+        "Можна писати будь-які питання щодо роботи бота."
+    )
+    waiting_question.add(message.from_user.id)
+
+
+@dp.message(F.text)
+async def handle_question(message: Message):
+    uid = message.from_user.id
+    if uid in waiting_question:
+        waiting_question.remove(uid)
+        if len(message.text.strip()) < 5:
+            await message.answer("❌ Питання має бути довшим за 5 символів.")
+            return
+        cur.execute("""
+            INSERT INTO appeals(user_id, username, question, created_at)
+            VALUES(?, ?, ?, ?)
+        """, (uid, message.from_user.username or "без ніка", message.text, datetime.now().isoformat()))
+        db.commit()
+        appeal_id = cur.lastrowid
+        await message.answer(
+            f"✅ Ваше питання відправлено адміністратору!\n"
+            f"🆔 Номер звернення: #{appeal_id}\n"
+            f"⏳ Очікуйте відповіді."
+        )
+        await bot.send_message(
+            ADMIN_ID,
+            f"📩 **НОВЕ ПИТАННЯ!**\n\n"
+            f"🆔 Звернення: #{appeal_id}\n"
+            f"👤 Користувач: {message.from_user.first_name} (@{message.from_user.username or 'без ніка'})\n"
+            f"🆔 ID: {uid}\n"
+            f"📝 Питання: {message.text}\n\n"
+            f"Відповісти: /answer {appeal_id} <текст>"
+        )
+        return
+    await message.answer("💘 Використовуйте кнопки меню:", reply_markup=main_menu())
+
+
+@dp.message(F.photo)
+async def get_photo(message: Message):
+    banned, until, reason = is_banned(message.from_user.id)
+    if banned:
+        await message.answer(f"🚫 Ви забанені до {until.strftime('%d.%m.%Y %H:%M')}")
+        return
+
+    uid = message.from_user.id
+    if uid not in photos:
+        photos[uid] = []
+    photos[uid].append(message.photo[-1].file_id)
+    if len(photos[uid]) > 2:
+        photos[uid] = photos[uid][:2]
+    if len(photos[uid]) < 2:
+        await message.answer("✅ Перше фото отримано!\nНадішліть друге фото ❤️")
+        return
+
+    p1, p2 = photos[uid][0], photos[uid][1]
+    text = random.choice(wishes)
+    pending[uid] = {"p1": p1, "p2": p2, "text": text}
+
+    if auto_approve:
+        try:
+            msg = await bot.send_media_group(
+                CHANNEL_ID,
+                media=[
+                    InputMediaPhoto(media=p1),
+                    InputMediaPhoto(media=p2, caption=text)
+                ]
+            )
+            number = save_post(
+                msg[0].message_id,
+                msg[1].message_id,
+                uid,
+                message.from_user.username,
+                message.from_user.first_name
+            )
+            await bot.edit_message_caption(
+                chat_id=CHANNEL_ID,
+                message_id=msg[1].message_id,
+                caption=text + f"\n\n🆔 Пост №{number}"
+            )
+            await message.answer(
+                f"✅ Заявку автоматично схвалено!\n\n"
+                f"🆔 Пост №{number}\n"
+                "❤️ Анкету опубліковано."
+            )
+            pending.pop(uid, None)
+            photos.pop(uid, None)
+            return
+        except Exception as e:
+            logging.exception("Помилка автоматичного схвалення")
+            await message.answer("❌ Не вдалося автоматично опублікувати заявку.")
+            photos.pop(uid, None)
+            return
+
+    try:
+        await bot.send_message(ADMIN_ID, "👑 НОВА ЗАЯВКА НА ПАРУ")
+        await bot.send_media_group(
+            ADMIN_ID,
+            media=[
+                InputMediaPhoto(media=p1),
+                InputMediaPhoto(media=p2, caption=text)
+            ]
+        )
+        await bot.send_message(
+            ADMIN_ID,
+            "Оберіть дію:",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="✅ Схвалити", callback_data=f"approve:{uid}"),
+                        InlineKeyboardButton(text="❌ Відхилити", callback_data=f"reject:{uid}")
+                    ]
+                ]
+            )
+        )
+        await message.answer("⏳ Заявку відправлено адміністратору.\nОчікуйте перевірки ❤️")
+    except Exception:
+        logging.exception("Помилка відправки заявки адміну")
+        await message.answer("❌ Не вдалося відправити заявку.")
+    photos.pop(uid, None)
+
+
+@dp.callback_query(lambda call: call.data.startswith("approve:"))
+async def approve(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    try:
+        uid = int(call.data.split(":")[1])
+    except ValueError:
+        await call.answer("❌ Помилка заявки", show_alert=True)
+        return
+    data = pending.get(uid)
+    if not data:
+        await call.answer("❌ Заявка вже оброблена", show_alert=True)
+        return
+    try:
+        msg = await bot.send_media_group(
+            CHANNEL_ID,
+            media=[
+                InputMediaPhoto(media=data["p1"]),
+                InputMediaPhoto(media=data["p2"], caption=data["text"])
+            ]
+        )
+        user = await bot.get_chat(uid)
+        number = save_post(
+            msg[0].message_id,
+            msg[1].message_id,
+            uid,
+            user.username,
+            user.first_name
+        )
+        await bot.edit_message_caption(
+            chat_id=CHANNEL_ID,
+            message_id=msg[1].message_id,
+            caption=data["text"] + f"\n\n🆔 Пост №{number}"
+        )
+        await call.message.edit_text(f"✅ ЗАЯВКА СХВАЛЕНА\n\n🆔 Пост №{number}\n📢 Опубліковано в канал.")
+        pending.pop(uid, None)
+    except Exception as e:
+        logging.exception("Помилка схвалення заявки")
+        await call.answer("❌ Помилка публікації", show_alert=True)
+
+
+@dp.callback_query(lambda call: call.data.startswith("reject:"))
+async def reject(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    try:
+        uid = int(call.data.split(":")[1])
+    except ValueError:
+        return
+    pending.pop(uid, None)
+    await call.message.edit_text("❌ ЗАЯВКУ ВІДХИЛЕНО")
+    await call.answer("Заявку відхилено")
+
+
+@dp.callback_query(lambda call: call.data == "services")
+async def services_handler(call: CallbackQuery):
+    await call.message.delete()
+    await call.message.answer(
+        "⭐ **ПЛАТНІ ПОСЛУГИ:**\n\n📌 **Закріпити анкету** — 5 ⭐\n   Ваша анкета буде закріплена на 2 дні\n\n🗑 **Видалити пост** — 5 ⭐\n   Видалення вашого поста з каналу\n\n💳 Оплата через Telegram Stars",
+        reply_markup=services_menu()
+    )
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "buy_pin")
+async def buy_pin(call: CallbackQuery):
+    try:
+        await bot.send_invoice(
+            chat_id=call.from_user.id,
+            title="📌 Закріплення поста",
+            description="Закріплення вашого поста в каналі на 2 дні",
+            payload="pin_post",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label="Закріплення", amount=5)]
+        )
+    except Exception as e:
+        await call.message.answer(f"❌ Помилка: {str(e)}")
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "buy_delete")
+async def buy_delete(call: CallbackQuery):
+    try:
+        await bot.send_invoice(
+            chat_id=call.from_user.id,
+            title="🗑 Видалення поста",
+            description="Видалення вашого поста з каналу",
+            payload="delete_post",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label="Видалення", amount=5)]
+        )
+    except Exception as e:
+        await call.message.answer(f"❌ Помилка: {str(e)}")
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "vip_basic")
+async def vip_basic(call: CallbackQuery):
+    try:
+        await bot.send_invoice(
+            chat_id=call.from_user.id,
+            title="💎 Базовий VIP",
+            description="VIP на 2 дні + автопублікація + позначка VIP",
+            payload="vip_basic",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label="VIP Basic", amount=10)]
+        )
+    except Exception as e:
+        await call.message.answer(f"❌ Помилка: {str(e)}")
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "vip_premium")
+async def vip_premium(call: CallbackQuery):
+    try:
+        await bot.send_invoice(
+            chat_id=call.from_user.id,
+            title="👑 Premium VIP",
+            description="VIP Premium: 2 дні + пріоритет + повторна публікація",
+            payload="vip_premium",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label="VIP Premium", amount=25)]
+        )
+    except Exception as e:
+        await call.message.answer(f"❌ Помилка: {str(e)}")
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "vip_menu")
+async def vip_menu_handler(call: CallbackQuery):
+    await call.message.delete()
+    await call.message.answer(
+        "💎 **VIP ПОСЛУГИ:**\n\n💎 **Базовий VIP** — 10 ⭐\n   VIP на 2 дні + автопублікація\n\n👑 **Premium VIP** — 25 ⭐\n   VIP Premium на 2 дні + пріоритет\n\n💳 Оплата через Telegram Stars",
+        reply_markup=vip_menu()
+    )
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "back")
+async def back_handler(call: CallbackQuery):
+    await call.message.delete()
+    await call.message.answer("💘 Головне меню:", reply_markup=main_menu())
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "rules")
+async def rules_handler(call: CallbackQuery):
+    await call.message.delete()
+    await call.message.answer(
+        "📜 **ПРАВИЛА:**\n\n🚫 Заборонено 18+\n🚫 Заборонено образи\n🚫 Заборонено спам\n❤️ Поважайте інших"
+    )
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "create")
+async def create_handler(call: CallbackQuery):
+    uid = call.from_user.id
+    photos[uid] = []
+    await call.message.delete()
+    await call.message.answer(
+        "📸 **Надішліть 2 фото:**\n\n1️⃣ Фото хлопця\n2️⃣ Фото дівчини ❤️\n\nНадішліть перше фото"
+    )
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "auto_approve_menu")
+async def auto_approve_menu_handler(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    status = "🟢 УВІМКНЕНО" if auto_approve else "🔴 ВИМКНЕНО"
+    await call.message.edit_text(f"⚙️ Налаштування\n\nСтатус: {status}", reply_markup=admin_menu())
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "auto_approve_on")
+async def auto_approve_on(call: CallbackQuery):
+    global auto_approve
+    if call.from_user.id != ADMIN_ID:
+        return
+    auto_approve = True
+    await call.answer("Увімкнено ✅")
+    await call.message.edit_text("🟢 АВТОМАТИЧНЕ СХВАЛЕННЯ УВІМКНЕНО!", reply_markup=admin_menu())
+
+
+@dp.callback_query(lambda call: call.data == "auto_approve_off")
+async def auto_approve_off(call: CallbackQuery):
+    global auto_approve
+    if call.from_user.id != ADMIN_ID:
+        return
+    auto_approve = False
+    await call.answer("Зупинено 🔴")
+    await call.message.edit_text("🔴 АВТОМАТИЧНЕ СХВАЛЕННЯ ЗУПИНЕНО!", reply_markup=admin_menu())
+
+
+@dp.pre_checkout_query()
+async def pre_checkout(query: PreCheckoutQuery):
+    await bot.answer_pre_checkout_query(query.id, ok=True)
+
+
+@dp.message(F.successful_payment)
+async def success_payment(message: Message):
+    payload = message.successful_payment.invoice_payload
+    uid = message.from_user.id
+    if payload == "vip_basic":
+        vip_users[uid] = ("basic", datetime.now() + timedelta(days=2))
+        set_role(uid, "vip")
+        await message.answer("💎 VIP Базовий активовано на 2 дні!")
+    elif payload == "vip_premium":
+        vip_users[uid] = ("premium", datetime.now() + timedelta(days=2))
+        set_role(uid, "vip")
+        await message.answer("👑 Premium VIP активовано на 2 дні!")
+    elif payload == "buy_mod":
+        set_role(uid, "moderator")
+        cur.execute("INSERT OR REPLACE INTO moderators(user_id, buy_date) VALUES(?, ?)",
+                    (uid, datetime.now().isoformat()))
+        db.commit()
+        await message.answer("👮 Ви тепер модератор!")
+    elif payload == "pin_post":
+        waiting_pin.add(uid)
+        await message.answer("📌 Введіть номер поста для закріплення.")
+    elif payload == "delete_post":
+        waiting_delete.add(uid)
+        await message.answer("🗑 Введіть номер поста для видалення.")
+
+
+@dp.message(F.text.regexp(r"^\d+$"))
+async def number_handler(message: Message):
+    uid = message.from_user.id
+    try:
+        number = int(message.text)
+    except ValueError:
+        return
+    if uid in waiting_pin:
+        waiting_pin.remove(uid)
+        data = get_post(number)
+        if not data:
+            await message.answer("❌ Пост не знайдено. Перевірте номер.")
+            return
+        try:
+            await bot.pin_chat_message(CHANNEL_ID, data[0])
+            await message.answer(f"📌 Пост №{number} закріплено на 2 дні!")
+            await asyncio.sleep(60 * 60 * 48)
+            try:
+                await bot.unpin_chat_message(CHANNEL_ID, data[0])
+            except:
+                pass
+        except Exception as e:
+            await message.answer(f"❌ Не вдалося закріпити пост: {str(e)}")
+        return
+    if uid in waiting_delete:
+        waiting_delete.remove(uid)
+        data = get_post(number)
+
+        if not data:
+            await message.answer("❌ Пост не знайдено. Перевірте номер.")
+            return
+
+        try:
+            await bot.delete_message(CHANNEL_ID, data[0])
+        except:
+            pass
+
+        try:
+            await bot.delete_message(CHANNEL_ID, data[1])
+        except:
+            pass
+
+        remove_post(number)
+        await message.answer(f"🗑 Пост №{number} видалено!")
+        return
+
+
+async def health(_: web.Request) -> web.Response:
+    """Fast liveness check for Render and an external Cron Job."""
+    return web.json_response({"status": "ok"})
+
+
+async def start_web_server() -> web.AppRunner:
+    app = web.Application()
+    app.router.add_get("/health", health)
+
+    port = int(os.getenv("PORT", "10000"))
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    site = web.TCPSite(
+        runner,
+        host="0.0.0.0",
+        port=port
+    )
+    await site.start()
+
+    logging.info("Health server listening on port %s", port)
+    return runner
+
+
+async def main() -> None:
+    runner = await start_web_server()
+
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await runner.cleanup()
+        await bot.session.close()
+        db.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
