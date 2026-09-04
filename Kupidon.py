@@ -1131,6 +1131,41 @@ async def number_handler(message: Message):
             await bot.delete_message(CHANNEL_ID, data[1])
         except:
             pass
-        remove_post(number)
+      remove_post(number)
         await message.answer(f"🗑 Пост №{number} видалено!")
         return
+
+
+async def health(_: web.Request) -> web.Response:
+    """Fast liveness check for Render and an external Cron Job."""
+    return web.json_response({"status": "ok"})
+
+
+async def start_web_server() -> web.AppRunner:
+    app = web.Application()
+    app.router.add_get("/health", health)
+
+    # Render provides this value at runtime; 10000 is for local development.
+    port = int(os.getenv("PORT", "10000"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=port)
+    await site.start()
+    logging.info("Health server listening on port %s", port)
+    return runner
+
+
+async def main() -> None:
+    runner = await start_web_server()
+    try:
+        # aiohttp and aiogram polling share one asyncio event loop, so neither
+        # blocks the other and the health endpoint remains available.
+        await dp.start_polling(bot)
+    finally:
+        await runner.cleanup()
+        await bot.session.close()
+        db.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
