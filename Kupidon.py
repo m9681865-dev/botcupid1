@@ -1216,14 +1216,12 @@ async def number_handler(message: Message):
             await message.answer("❌ Пост не знайдено. Перевірте номер.")
             return
         try:
-            # Проверяем, что пользователь - владелец поста
             if data[2] != uid and not is_admin(uid):
                 await message.answer("❌ Ви можете закріпити тільки свій пост!")
                 return
             await bot.pin_chat_message(CHANNEL_ID, data[0])
             await message.answer(f"📌 Пост №{number} закріплено на 2 дні!")
             
-            # Автоматическое открепление через 48 часов
             async def unpin_later():
                 await asyncio.sleep(60 * 60 * 48)
                 try:
@@ -1245,29 +1243,46 @@ async def number_handler(message: Message):
             await message.answer("❌ Пост не знайдено. Перевірте номер.")
             return
         
-        # Проверяем, что пользователь - владелец поста или админ
         if data[2] != uid and not is_admin(uid):
             await message.answer("❌ Ви можете видалити тільки свій пост!")
             return
         
+        msg_id_1, msg_id_2, post_user_id, username, first_name, created_at = data
+        
+        # Пробуем удалить оба сообщения
+        deleted = 0
+        errors = []
+        
         try:
-            # Удаляем оба сообщения из канала
-            try:
-                await bot.delete_message(CHANNEL_ID, data[0])
-            except Exception as e:
-                logging.warning(f"Не удалось удалить сообщение 1: {e}")
-            
-            try:
-                await bot.delete_message(CHANNEL_ID, data[1])
-            except Exception as e:
-                logging.warning(f"Не удалось удалить сообщение 2: {e}")
-            
-            # Удаляем из базы
-            remove_post(number)
-            await message.answer(f"🗑 Пост №{number} видалено!")
-            
+            await bot.delete_message(chat_id=CHANNEL_ID, message_id=msg_id_1)
+            deleted += 1
+            logging.info(f"Удалено сообщение 1 (ID: {msg_id_1}) поста №{number}")
         except Exception as e:
-            await message.answer(f"❌ Помилка видалення: {str(e)}")
+            error_text = f"Сообщение 1: {str(e)}"
+            errors.append(error_text)
+            logging.error(f"Ошибка удаления сообщения 1: {e}")
+        
+        try:
+            await bot.delete_message(chat_id=CHANNEL_ID, message_id=msg_id_2)
+            deleted += 1
+            logging.info(f"Удалено сообщение 2 (ID: {msg_id_2}) поста №{number}")
+        except Exception as e:
+            error_text = f"Сообщение 2: {str(e)}"
+            errors.append(error_text)
+            logging.error(f"Ошибка удаления сообщения 2: {e}")
+        
+        # Удаляем из БД в любом случае
+        remove_post(number)
+        
+        if errors:
+            await message.answer(
+                f"⚠️ Пост №{number} видалено з БД, але були помилки:\n" + "\n".join(errors)
+            )
+        else:
+            await message.answer(f"✅ Пост №{number} повністю видалено з каналу та БД!")
+        return
+    
+    await message.answer("❌ Немає активних операцій для цього номера.")
 
 
 # ============= WEB СЕРВЕР =============
