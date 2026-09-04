@@ -20,7 +20,9 @@ from aiogram.types import (
     InlineKeyboardButton,
     InputMediaPhoto,
     LabeledPrice,
-    PreCheckoutQuery
+    PreCheckoutQuery,
+    ReplyKeyboardMarkup,
+    KeyboardButton
 )
 
 
@@ -38,21 +40,18 @@ dp = Dispatcher()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "cupid.db")
 
-# Проверяем, можем ли писать в папку
 try:
     test_file = os.path.join(BASE_DIR, "test_write.tmp")
     with open(test_file, "w") as f:
         f.write("test")
     os.remove(test_file)
 except Exception:
-    # Если не можем — используем /tmp
     DB_PATH = "/tmp/cupid.db"
     logging.warning(f"Использую временную базу: {DB_PATH}")
 
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 cur = db.cursor()
 
-# Создаем таблицы
 cur.execute("""CREATE TABLE IF NOT EXISTS posts(
     number INTEGER PRIMARY KEY,
     message_id_1 INTEGER,
@@ -105,6 +104,13 @@ cur.execute("""CREATE TABLE IF NOT EXISTS appeals(
     status TEXT DEFAULT 'open',
     created_at TEXT,
     answered_at TEXT
+)""")
+
+cur.execute("""CREATE TABLE IF NOT EXISTS vip_users(
+    user_id INTEGER PRIMARY KEY,
+    vip_type TEXT,
+    expires_at TEXT,
+    created_at TEXT
 )""")
 
 db.commit()
@@ -185,6 +191,49 @@ def get_all_posts():
     return cur.fetchall()
 
 
+def get_user_posts(user_id):
+    cur.execute("SELECT number, message_id_1, message_id_2, created_at FROM posts WHERE user_id=? ORDER BY number DESC",
+                (user_id,))
+    return cur.fetchall()
+
+
+# ============= VIP ФУНКЦИИ =============
+def set_vip(user_id, vip_type, days=2):
+    expires_at = (datetime.now() + timedelta(days=days)).isoformat()
+    cur.execute("""INSERT OR REPLACE INTO vip_users(user_id, vip_type, expires_at, created_at)
+                   VALUES(?, ?, ?, ?)""",
+                (user_id, vip_type, expires_at, datetime.now().isoformat()))
+    db.commit()
+    set_role(user_id, "vip")
+
+
+def get_vip(user_id):
+    cur.execute("SELECT vip_type, expires_at FROM vip_users WHERE user_id=?", (user_id,))
+    row = cur.fetchone()
+    if not row:
+        return None, None
+    vip_type, expires_at_str = row
+    expires_at = datetime.fromisoformat(expires_at_str)
+    if datetime.now() > expires_at:
+        cur.execute("DELETE FROM vip_users WHERE user_id=?", (user_id,))
+        db.commit()
+        set_role(user_id, "user")
+        return None, None
+    return vip_type, expires_at
+
+
+def check_and_clean_vips():
+    cur.execute("SELECT user_id, expires_at FROM vip_users")
+    rows = cur.fetchall()
+    for user_id, expires_at_str in rows:
+        expires_at = datetime.fromisoformat(expires_at_str)
+        if datetime.now() > expires_at:
+            cur.execute("DELETE FROM vip_users WHERE user_id=?", (user_id,))
+            db.commit()
+            set_role(user_id, "user")
+
+
+# ============= ДАННЫЕ =============
 phrases = [
     "💘 Судьба свела двух незнакомцев... или это просто глюк телеги?"
 ]
@@ -211,9 +260,9 @@ waiting_delete = set()
 waiting_pin = set()
 waiting_question = set()
 auto_approve = False
-vip_users = {}
 
 
+# ============= ПРОБИТ ФУНКЦИИ =============
 def save_probit_history(user_id, query, result):
     cur.execute("""INSERT INTO probit_history(user_id, query, result, created_at)
                    VALUES(?, ?, ?, ?)""",
@@ -362,8 +411,8 @@ def format_probit_report(data):
     return output
 
 
+# ============= МЕНЮ =============
 def main_menu():
-    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="💌 Створити пару")],
@@ -379,8 +428,8 @@ def main_menu():
 def vip_menu():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💎 Базовий VIP", callback_data="vip_basic")],
-            [InlineKeyboardButton(text="👑 Premium VIP", callback_data="vip_premium")],
+            [InlineKeyboardButton(text="💎 Базовий VIP — 10 ⭐", callback_data="vip_basic")],
+            [InlineKeyboardButton(text="👑 Premium VIP — 25 ⭐", callback_data="vip_premium")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="back")]
         ]
     )
@@ -407,6 +456,7 @@ def admin_menu():
     )
 
 
+# ============= КОМАНДЫ =============
 @dp.message(Command("start"))
 async def start(message: Message):
     banned, until, reason = is_banned(message.from_user.id)
@@ -719,6 +769,55 @@ async def answer_appeal(message: Message):
     )
 
 
+@dp.message(Command("vip_status"))
+async def vip_status(message: Message):
+    uid = message.from_user.id
+    vip_type, expires_at = get_vip(uid)
+    if vip_type:
+        await message.answer(
+            f"💎 **ВАШ VIP СТАТУС:**\n\n"
+            f"Тип: {vip_type.upper()}\n"
+            f"Діє до: {expires_at.strftime('%d.%m.%Y %H:%M')}\n"
+            f"Залишилось: {(expires_at - datetime.now()).days} днів"
+        )
+    else:
+        await message.answer(
+            "❌ У вас немає активного VIP.\n\n"
+            "Купити VIP: /vip"
+        )
+
+
+@dp.message(Command("vip"))
+async def vip_command(message: Message):
+    await message.answer(
+        "💎 **VIP ПОСЛУГИ:**\n\n"
+        "💎 Базовий VIP — 10 ⭐\n"
+        "   • VIP на 2 дні\n"
+        "   • Автопублікація без модерації\n"
+        "   • Позначка VIP\n\n"
+        "👑 Premium VIP — 25 ⭐\n"
+        "   • Все що в базовому\n"
+        "   • Пріоритетна обробка\n"
+        "   • Повторна публікація\n\n"
+        "Натисніть кнопку нижче для покупки:",
+        reply_markup=vip_menu()
+    )
+
+
+@dp.message(Command("cancel"))
+async def cancel_payment(message: Message):
+    uid = message.from_user.id
+    if uid in waiting_pin:
+        waiting_pin.remove(uid)
+        await message.answer("❌ Операцію скасовано.")
+    elif uid in waiting_delete:
+        waiting_delete.remove(uid)
+        await message.answer("❌ Операцію скасовано.")
+    else:
+        await message.answer("❌ Немає активних операцій для скасування.")
+
+
+# ============= КНОПКИ МЕНЮ =============
 @dp.message(F.text == "💌 Створити пару")
 async def create_pair(message: Message):
     banned, until, reason = is_banned(message.from_user.id)
@@ -801,6 +900,7 @@ async def handle_question(message: Message):
     await message.answer("💘 Використовуйте кнопки меню:", reply_markup=main_menu())
 
 
+# ============= ОБРАБОТКА ФОТО =============
 @dp.message(F.photo)
 async def get_photo(message: Message):
     banned, until, reason = is_banned(message.from_user.id)
@@ -820,9 +920,16 @@ async def get_photo(message: Message):
 
     p1, p2 = photos[uid][0], photos[uid][1]
     text = random.choice(wishes)
+    
+    vip_type, vip_expires = get_vip(uid)
+    is_vip = vip_type is not None
+    
+    if is_vip:
+        text += f"\n\n💎 VIP: {vip_type.upper()}"
+    
     pending[uid] = {"p1": p1, "p2": p2, "text": text}
 
-    if auto_approve:
+    if auto_approve or is_vip:
         try:
             msg = await bot.send_media_group(
                 CHANNEL_ID,
@@ -844,7 +951,7 @@ async def get_photo(message: Message):
                 caption=text + f"\n\n🆔 Пост №{number}"
             )
             await message.answer(
-                f"✅ Заявку автоматично схвалено!\n\n"
+                f"✅ Заявку автоматично схвалено!{' (VIP)' if is_vip else ''}\n\n"
                 f"🆔 Пост №{number}\n"
                 "❤️ Анкету опубліковано."
             )
@@ -868,7 +975,7 @@ async def get_photo(message: Message):
         )
         await bot.send_message(
             ADMIN_ID,
-            "Оберіть дію:",
+            f"Оберіть дію:\n{'💎 VIP пользователь' if is_vip else ''}",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
@@ -885,6 +992,7 @@ async def get_photo(message: Message):
     photos.pop(uid, None)
 
 
+# ============= КОЛБЭКИ =============
 @dp.callback_query(lambda call: call.data.startswith("approve:"))
 async def approve(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
@@ -937,16 +1045,6 @@ async def reject(call: CallbackQuery):
     pending.pop(uid, None)
     await call.message.edit_text("❌ ЗАЯВКУ ВІДХИЛЕНО")
     await call.answer("Заявку відхилено")
-
-
-@dp.callback_query(lambda call: call.data == "services")
-async def services_handler(call: CallbackQuery):
-    await call.message.delete()
-    await call.message.answer(
-        "⭐ **ПЛАТНІ ПОСЛУГИ:**\n\n📌 **Закріпити анкету** — 5 ⭐\n   Ваша анкета буде закріплена на 2 дні\n\n🗑 **Видалити пост** — 5 ⭐\n   Видалення вашого поста з каналу\n\n💳 Оплата через Telegram Stars",
-        reply_markup=services_menu()
-    )
-    await call.answer()
 
 
 @dp.callback_query(lambda call: call.data == "buy_pin")
@@ -1017,40 +1115,10 @@ async def vip_premium(call: CallbackQuery):
     await call.answer()
 
 
-@dp.callback_query(lambda call: call.data == "vip_menu")
-async def vip_menu_handler(call: CallbackQuery):
-    await call.message.delete()
-    await call.message.answer(
-        "💎 **VIP ПОСЛУГИ:**\n\n💎 **Базовий VIP** — 10 ⭐\n   VIP на 2 дні + автопублікація\n\n👑 **Premium VIP** — 25 ⭐\n   VIP Premium на 2 дні + пріоритет\n\n💳 Оплата через Telegram Stars",
-        reply_markup=vip_menu()
-    )
-    await call.answer()
-
-
 @dp.callback_query(lambda call: call.data == "back")
 async def back_handler(call: CallbackQuery):
     await call.message.delete()
     await call.message.answer("💘 Головне меню:", reply_markup=main_menu())
-    await call.answer()
-
-
-@dp.callback_query(lambda call: call.data == "rules")
-async def rules_handler(call: CallbackQuery):
-    await call.message.delete()
-    await call.message.answer(
-        "📜 **ПРАВИЛА:**\n\n🚫 Заборонено 18+\n🚫 Заборонено образи\n🚫 Заборонено спам\n❤️ Поважайте інших"
-    )
-    await call.answer()
-
-
-@dp.callback_query(lambda call: call.data == "create")
-async def create_handler(call: CallbackQuery):
-    uid = call.from_user.id
-    photos[uid] = []
-    await call.message.delete()
-    await call.message.answer(
-        "📸 **Надішліть 2 фото:**\n\n1️⃣ Фото хлопця\n2️⃣ Фото дівчини ❤️\n\nНадішліть перше фото"
-    )
     await call.answer()
 
 
@@ -1083,6 +1151,7 @@ async def auto_approve_off(call: CallbackQuery):
     await call.message.edit_text("🔴 АВТОМАТИЧНЕ СХВАЛЕННЯ ЗУПИНЕНО!", reply_markup=admin_menu())
 
 
+# ============= ПЛАТЕЖИ =============
 @dp.pre_checkout_query()
 async def pre_checkout(query: PreCheckoutQuery):
     await bot.answer_pre_checkout_query(query.id, ok=True)
@@ -1092,28 +1161,45 @@ async def pre_checkout(query: PreCheckoutQuery):
 async def success_payment(message: Message):
     payload = message.successful_payment.invoice_payload
     uid = message.from_user.id
+    
     if payload == "vip_basic":
-        vip_users[uid] = ("basic", datetime.now() + timedelta(days=2))
-        set_role(uid, "vip")
-        await message.answer("💎 VIP Базовий активовано на 2 дні!")
+        existing_vip, _ = get_vip(uid)
+        if existing_vip:
+            await message.answer("❌ У вас уже есть VIP! Он будет продлен.")
+        set_vip(uid, "basic", 2)
+        await message.answer(
+            f"💎 **VIP Базовий активовано на 2 дні!**\n\n"
+            f"✅ Автопублікація увімкнена\n"
+            f"⭐ Позначка VIP в профілі\n"
+            f"📅 Діє до: {(datetime.now() + timedelta(days=2)).strftime('%d.%m.%Y %H:%M')}"
+        )
+        
     elif payload == "vip_premium":
-        vip_users[uid] = ("premium", datetime.now() + timedelta(days=2))
-        set_role(uid, "vip")
-        await message.answer("👑 Premium VIP активовано на 2 дні!")
-    elif payload == "buy_mod":
-        set_role(uid, "moderator")
-        cur.execute("INSERT OR REPLACE INTO moderators(user_id, buy_date) VALUES(?, ?)",
-                    (uid, datetime.now().isoformat()))
-        db.commit()
-        await message.answer("👮 Ви тепер модератор!")
+        existing_vip, _ = get_vip(uid)
+        if existing_vip:
+            await message.answer("❌ У вас уже есть VIP! Он будет продлен.")
+        set_vip(uid, "premium", 2)
+        await message.answer(
+            f"👑 **Premium VIP активовано на 2 дні!**\n\n"
+            f"✅ Автопублікація увімкнена\n"
+            f"⭐ Позначка VIP в профілі\n"
+            f"🚀 Пріоритетна обробка заявок\n"
+            f"📅 Діє до: {(datetime.now() + timedelta(days=2)).strftime('%d.%m.%Y %H:%M')}"
+        )
+        
     elif payload == "pin_post":
         waiting_pin.add(uid)
         await message.answer("📌 Введіть номер поста для закріплення.")
+        
     elif payload == "delete_post":
         waiting_delete.add(uid)
         await message.answer("🗑 Введіть номер поста для видалення.")
+        
+    else:
+        await message.answer("❌ Невідомий тип платежу.")
 
 
+# ============= ОБРАБОТКА ЧИСЕЛ (PIN / DELETE) =============
 @dp.message(F.text.regexp(r"^\d+$"))
 async def number_handler(message: Message):
     uid = message.from_user.id
@@ -1121,6 +1207,8 @@ async def number_handler(message: Message):
         number = int(message.text)
     except ValueError:
         return
+    
+    # ========== ЗАКРІПЛЕННЯ ПОСТА ==========
     if uid in waiting_pin:
         waiting_pin.remove(uid)
         data = get_post(number)
@@ -1128,67 +1216,81 @@ async def number_handler(message: Message):
             await message.answer("❌ Пост не знайдено. Перевірте номер.")
             return
         try:
+            # Проверяем, что пользователь - владелец поста
+            if data[2] != uid and not is_admin(uid):
+                await message.answer("❌ Ви можете закріпити тільки свій пост!")
+                return
             await bot.pin_chat_message(CHANNEL_ID, data[0])
             await message.answer(f"📌 Пост №{number} закріплено на 2 дні!")
-            await asyncio.sleep(60 * 60 * 48)
-            try:
-                await bot.unpin_chat_message(CHANNEL_ID, data[0])
-            except:
-                pass
+            
+            # Автоматическое открепление через 48 часов
+            async def unpin_later():
+                await asyncio.sleep(60 * 60 * 48)
+                try:
+                    await bot.unpin_chat_message(CHANNEL_ID, data[0])
+                except:
+                    pass
+            asyncio.create_task(unpin_later())
+            
         except Exception as e:
             await message.answer(f"❌ Не вдалося закріпити пост: {str(e)}")
         return
+    
+    # ========== ВИДАЛЕННЯ ПОСТА ==========
     if uid in waiting_delete:
         waiting_delete.remove(uid)
         data = get_post(number)
-
+        
         if not data:
             await message.answer("❌ Пост не знайдено. Перевірте номер.")
             return
-
+        
+        # Проверяем, что пользователь - владелец поста или админ
+        if data[2] != uid and not is_admin(uid):
+            await message.answer("❌ Ви можете видалити тільки свій пост!")
+            return
+        
         try:
-            await bot.delete_message(CHANNEL_ID, data[0])
-        except:
-            pass
+            # Удаляем оба сообщения из канала
+            try:
+                await bot.delete_message(CHANNEL_ID, data[0])
+            except Exception as e:
+                logging.warning(f"Не удалось удалить сообщение 1: {e}")
+            
+            try:
+                await bot.delete_message(CHANNEL_ID, data[1])
+            except Exception as e:
+                logging.warning(f"Не удалось удалить сообщение 2: {e}")
+            
+            # Удаляем из базы
+            remove_post(number)
+            await message.answer(f"🗑 Пост №{number} видалено!")
+            
+        except Exception as e:
+            await message.answer(f"❌ Помилка видалення: {str(e)}")
 
-        try:
-            await bot.delete_message(CHANNEL_ID, data[1])
-        except:
-            pass
 
-        remove_post(number)
-        await message.answer(f"🗑 Пост №{number} видалено!")
-        return
-
-
+# ============= WEB СЕРВЕР =============
 async def health(_: web.Request) -> web.Response:
-    """Fast liveness check for Render and an external Cron Job."""
     return web.json_response({"status": "ok"})
 
 
 async def start_web_server() -> web.AppRunner:
     app = web.Application()
     app.router.add_get("/health", health)
-
     port = int(os.getenv("PORT", "10000"))
-
     runner = web.AppRunner(app)
     await runner.setup()
-
-    site = web.TCPSite(
-        runner,
-        host="0.0.0.0",
-        port=port
-    )
+    site = web.TCPSite(runner, host="0.0.0.0", port=port)
     await site.start()
-
     logging.info("Health server listening on port %s", port)
     return runner
 
 
+# ============= MAIN =============
 async def main() -> None:
+    check_and_clean_vips()
     runner = await start_web_server()
-
     try:
         await dp.start_polling(bot)
     finally:
