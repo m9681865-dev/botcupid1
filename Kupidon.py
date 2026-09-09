@@ -26,7 +26,9 @@ from aiogram.types import (
 )
 
 
-TOKEN = "8982055607:AAEKKBdUejE8rwZVGldY-MUxWe6X1GOjkSI"
+TOKEN = os.getenv("8982055607:AAEKKBdUejE8rwZVGldY-MUxWe6X1GOjkSI")
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN не задан у змінних середовища")
 ADMIN_ID = 7806482040
 OWNER_ID = 7806482040
 CHANNEL_ID = -1004428565734
