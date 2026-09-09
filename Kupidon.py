@@ -27,7 +27,6 @@ from aiogram.types import (
 
 
 TOKEN = "8982055607:AAEKKBdUejE8rwZVGldY-MUxWe6X1GOjkSI"
-
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN не задан у змінних середовища")
 ADMIN_ID = 7806482040
@@ -518,7 +517,7 @@ def admin_menu():
         inline_keyboard=[
             [InlineKeyboardButton(text=f"⚙️ Автоматичне схвалення: {status}", callback_data="auto_approve_menu")],
             [InlineKeyboardButton(text="🟢 Увімкнути", callback_data="auto_approve_on")],
-            [InlineKeyboardButton(text="🔴 Зупинити", callback_data="auto_approve_off")]
+            [InlineKeyboardButton(text="🔴 Зупинити", callback_data="auto_approve_off")],
             [InlineKeyboardButton(text="👮 Адміни постів", callback_data="post_admins_menu")]
         ]
     )
